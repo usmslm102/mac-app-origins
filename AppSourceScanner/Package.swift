@@ -3,16 +3,16 @@
 import PackageDescription
 
 let package = Package(
-    name: "AppSourceScanner",
+    name: "AppOrigins",
     platforms: [
         .macOS(.v13)
     ],
     products: [
-        .executable(name: "AppSourceScanner", targets: ["AppSourceScanner"])
+        .executable(name: "AppOrigins", targets: ["AppOrigins"])
     ],
     targets: [
         .executableTarget(
-            name: "AppSourceScanner",
+            name: "AppOrigins",
             path: "Sources/AppSourceScanner"
         )
     ]

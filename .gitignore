@@ -1,6 +1,5 @@
 AppSourceScanner/Sources/.DS_Store
 .DS_Store
-AppSourceScanner/dist/AppSourceScanner.app/Contents/MacOS/AppSourceScanner
-AppSourceScanner/dmg/Applications
-AppSourceScanner/dmg/AppSourceScanner.app/Contents/MacOS/AppSourceScanner
-AppSourceScanner/AppSourceScanner.dmg
+dist/
+dmg/
+*.dmg

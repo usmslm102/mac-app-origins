@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct AppSourceScannerApp: App {
+struct AppOriginsApp: App {
     @StateObject private var viewModel = AppScannerViewModel()
 
     var body: some Scene {
