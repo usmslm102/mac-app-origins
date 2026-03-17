@@ -61,7 +61,7 @@ final class AppScannerViewModel: ObservableObject {
             scanner.scanApplications()
         }.value
 
-        apps = scannedApps
+        apps = scannedApps.map(makeInstalledApp)
         if let selectedAppID, !apps.contains(where: { $0.id == selectedAppID }) {
             self.selectedAppID = nil
         }
@@ -175,11 +175,7 @@ final class AppScannerViewModel: ObservableObject {
         let panel = NSSavePanel()
         panel.canCreateDirectories = true
         panel.nameFieldStringValue = "\(defaultName).\(fileExtension)"
-        if let contentType = UTType(filenameExtension: fileExtension) {
-            panel.allowedContentTypes = [contentType]
-        } else {
-            panel.allowedFileTypes = [fileExtension]
-        }
+        panel.allowedContentTypes = [UTType(filenameExtension: fileExtension) ?? .data]
 
         guard panel.runModal() == .OK, let url = panel.url else {
             return
@@ -196,6 +192,18 @@ final class AppScannerViewModel: ObservableObject {
         "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
     }
 
+    private func makeInstalledApp(from scannedApp: ScannedApp) -> InstalledApp {
+        let icon: NSImage
+        switch scannedApp.kind {
+        case .application:
+            icon = NSWorkspace.shared.icon(forFile: scannedApp.path)
+        case .cliTool:
+            icon = cliIcon()
+        }
+
+        return InstalledApp(scannedApp: scannedApp, icon: icon)
+    }
+
     private func app(for appID: InstalledApp.ID?) -> InstalledApp? {
         guard let appID else { return nil }
         return apps.first(where: { $0.id == appID })
@@ -208,6 +216,14 @@ final class AppScannerViewModel: ObservableObject {
     private func canTrash(_ app: InstalledApp) -> Bool {
         guard app.kind == .application else { return false }
         return FileManager.default.isDeletableFile(atPath: app.path)
+    }
+
+    private func cliIcon() -> NSImage {
+        if let symbolImage = NSImage(systemSymbolName: "terminal", accessibilityDescription: "CLI Tool") {
+            return symbolImage
+        }
+
+        return NSWorkspace.shared.icon(for: .unixExecutable)
     }
 }
 

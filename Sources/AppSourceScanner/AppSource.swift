@@ -1,15 +1,35 @@
 import AppKit
 import Foundation
 
-enum AppSource: String, CaseIterable, Codable {
+enum AppSource: String, CaseIterable, Codable, Sendable {
     case homebrew = "Homebrew"
     case appStore = "App Store"
     case manual = "Manual / Unknown"
 }
 
-enum InstallKind: String, CaseIterable, Codable {
+enum InstallKind: String, CaseIterable, Codable, Sendable {
     case application = "Application"
     case cliTool = "CLI Tool"
+}
+
+struct ScannedApp: Identifiable, Sendable {
+    let id: String
+    let name: String
+    let kind: InstallKind
+    let bundleIdentifier: String
+    let version: String
+    let path: String
+    let source: AppSource
+
+    init(name: String, kind: InstallKind, bundleIdentifier: String, version: String, path: String, source: AppSource) {
+        self.id = path
+        self.name = name
+        self.kind = kind
+        self.bundleIdentifier = bundleIdentifier
+        self.version = version
+        self.path = path
+        self.source = source
+    }
 }
 
 struct InstalledApp: Identifiable {
@@ -30,6 +50,17 @@ struct InstalledApp: Identifiable {
         self.version = version
         self.path = path
         self.source = source
+        self.icon = icon
+    }
+
+    init(scannedApp: ScannedApp, icon: NSImage) {
+        self.id = scannedApp.id
+        self.name = scannedApp.name
+        self.kind = scannedApp.kind
+        self.bundleIdentifier = scannedApp.bundleIdentifier
+        self.version = scannedApp.version
+        self.path = scannedApp.path
+        self.source = scannedApp.source
         self.icon = icon
     }
 

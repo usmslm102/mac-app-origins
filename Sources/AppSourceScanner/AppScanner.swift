@@ -1,8 +1,7 @@
-import AppKit
 import Foundation
 
 struct AppScanner {
-    func scanApplications() -> [InstalledApp] {
+    func scanApplications() -> [ScannedApp] {
         let brewApps = loadBrewCasks()
         let appStoreApps = loadMasApps()
         let applicationURLs = loadApplicationURLs()
@@ -10,14 +9,13 @@ struct AppScanner {
         let applications = applicationURLs.compactMap { appURL in
             let appName = appURL.deletingPathExtension().lastPathComponent
             let source = detectSource(for: appURL, appName: appName, brewApps: brewApps, appStoreApps: appStoreApps)
-            return InstalledApp(
+            return ScannedApp(
                 name: appName,
                 kind: .application,
                 bundleIdentifier: bundleIdentifier(for: appURL),
                 version: version(for: appURL),
                 path: appURL.path,
-                source: source,
-                icon: NSWorkspace.shared.icon(forFile: appURL.path)
+                source: source
             )
         }
 
@@ -89,7 +87,7 @@ struct AppScanner {
         return Set(names)
     }
 
-    private func loadBrewFormulae() -> [InstalledApp] {
+    private func loadBrewFormulae() -> [ScannedApp] {
         guard let output = Shell.run("brew", arguments: ["list", "--formula"]) else {
             return []
         }
@@ -97,7 +95,6 @@ struct AppScanner {
         let versions = loadBrewFormulaVersions()
         let cellarPath = Shell.run("brew", arguments: ["--cellar"])?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? "/opt/homebrew/Cellar"
-        let icon = cliIcon()
 
         return output
             .split(whereSeparator: \.isNewline)
@@ -106,14 +103,13 @@ struct AppScanner {
             .map { formula in
                 let version = versions[formula] ?? "Installed"
                 let path = URL(fileURLWithPath: cellarPath).appendingPathComponent(formula).path
-                return InstalledApp(
+                return ScannedApp(
                     name: formula,
                     kind: .cliTool,
                     bundleIdentifier: formula,
                     version: version,
                     path: path,
-                    source: .homebrew,
-                    icon: icon
+                    source: .homebrew
                 )
             }
     }
@@ -187,14 +183,6 @@ struct AppScanner {
         default:
             return "Unknown"
         }
-    }
-
-    private func cliIcon() -> NSImage {
-        if let symbolImage = NSImage(systemSymbolName: "terminal", accessibilityDescription: "CLI Tool") {
-            return symbolImage
-        }
-
-        return NSWorkspace.shared.icon(forFileType: "public.unix-executable")
     }
 
     private func normalize(_ value: String) -> String {
