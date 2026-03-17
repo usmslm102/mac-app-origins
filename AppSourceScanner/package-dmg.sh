@@ -3,6 +3,9 @@
 set -euo pipefail
 
 APP_NAME="AppOrigins"
+APP_VERSION="${APP_VERSION:-1.0.0}"
+BUILD_NUMBER="${BUILD_NUMBER:-1}"
+BUNDLE_IDENTIFIER="${BUNDLE_IDENTIFIER:-com.usamaansari.AppOrigins}"
 APP_BUNDLE="dist/${APP_NAME}.app"
 CONTENTS_DIR="${APP_BUNDLE}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
@@ -21,12 +24,12 @@ if [[ -f "${ICON_SOURCE}" ]]; then
 fi
 
 /usr/libexec/PlistBuddy -c "Add :CFBundleExecutable string ${APP_NAME}" "${CONTENTS_DIR}/Info.plist"
-/usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.usamaansari.${APP_NAME}" "${CONTENTS_DIR}/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string ${BUNDLE_IDENTIFIER}" "${CONTENTS_DIR}/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleName string ${APP_NAME}" "${CONTENTS_DIR}/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string ${APP_NAME}" "${CONTENTS_DIR}/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundlePackageType string APPL" "${CONTENTS_DIR}/Info.plist"
-/usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.0" "${CONTENTS_DIR}/Info.plist"
-/usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 1" "${CONTENTS_DIR}/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string ${APP_VERSION}" "${CONTENTS_DIR}/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${BUILD_NUMBER}" "${CONTENTS_DIR}/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :LSMinimumSystemVersion string 13.0" "${CONTENTS_DIR}/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :NSHighResolutionCapable bool true" "${CONTENTS_DIR}/Info.plist"
 

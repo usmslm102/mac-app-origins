@@ -123,6 +123,23 @@ xattr -dr com.apple.quarantine /Applications/AppOrigins.app
 
 You do not need the Apple Developer Program if you only want to upload an unsigned DMG for personal use.
 
+This repo now includes an unsigned release workflow at `.github/workflows/release-unsigned.yml`.
+
+To trigger it:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+That workflow builds `AppOrigins.dmg`, creates a SHA256 checksum, and uploads both files to the GitHub release for that tag.
+
+If you want to do it manually instead, you can still use:
+
+```bash
+./package-dmg.sh
+```
+
 After building `AppOrigins.dmg`, create a GitHub release and upload it:
 
 ```bash

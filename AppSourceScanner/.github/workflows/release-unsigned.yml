@@ -1,0 +1,44 @@
+name: Release Unsigned DMG
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Build unsigned DMG
+        env:
+          APP_VERSION: ${{ github.ref_name }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          chmod +x ./package-dmg.sh
+          export APP_VERSION="${APP_VERSION#v}"
+          ./package-dmg.sh
+
+      - name: Create checksum
+        run: shasum -a 256 AppOrigins.dmg > AppOrigins.dmg.sha256
+
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" AppOrigins.dmg AppOrigins.dmg.sha256 --clobber
+          else
+            gh release create "$TAG_NAME" \
+              AppOrigins.dmg \
+              AppOrigins.dmg.sha256 \
+              --title "$TAG_NAME" \
+              --notes "Unsigned self-use build."
+          fi
