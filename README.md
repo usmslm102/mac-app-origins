@@ -2,7 +2,7 @@
 
 ![AppOrigins icon](assets/apporigins-icon.svg)
 
-[![Release](https://img.shields.io/github/v/release/<your-account>/AppOrigins?display_name=tag)](https://github.com/<your-account>/AppOrigins/releases)
+[![Release](https://img.shields.io/github/v/release/usmslm102/mac-app-origins?display_name=tag)](https://github.com/usmslm102/mac-app-origins/releases)
 
 AppOrigins is a native macOS SwiftUI utility for inspecting installed software and where it came from.
 
@@ -18,12 +18,7 @@ It scans your installed apps and Homebrew formulae, then surfaces:
 
 ## Demo
 
-Add your demo GIF here once the repo is public:
-
-```md
 ![AppOrigins demo](demo/demo.gif)
-```
-
 
 ## Features
 
