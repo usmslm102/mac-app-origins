@@ -2,159 +2,131 @@
 
 ![AppOrigins icon](assets/apporigins-icon.svg)
 
-Native macOS SwiftUI utility that scans installed apps and labels them as:
+[![Release](https://img.shields.io/github/v/release/<your-account>/AppOrigins?display_name=tag)](https://github.com/<your-account>/AppOrigins/releases)
 
-- `Homebrew`
-- `App Store`
-- `Manual / Unknown`
+AppOrigins is a native macOS SwiftUI utility for inspecting installed software and where it came from.
 
-## Unsigned Build Warning
+It scans your installed apps and Homebrew formulae, then surfaces:
 
-This app is currently unsigned and not notarized.
+- source: `Homebrew`, `App Store`, or `Manual / Unknown`
+- install type: app bundle or CLI tool
+- version
+- size
+- duplicate installs
+- signing status
+- path and bundle identifier
 
-Use it at your own risk.
+## Demo
 
-macOS may warn you the first time you open it because it is not signed by an identified developer. For personal use, you can usually launch it with `Right Click > Open`, or remove quarantine manually after copying it into `Applications`.
+Add your demo GIF here once the repo is public:
 
-## Current v1 features
+```md
+![AppOrigins demo](demo/demo.gif)
+```
 
-- Scans both `/Applications` and `~/Applications`
-- Shows app icon, version, security status, size, bundle ID, source, and path
-- Search across app name, source, security status, version, duplicate status, size, bundle ID, and path
-- Filter by source
+
+## Features
+
+- Scan `/Applications` and `~/Applications`
+- Detect Homebrew casks and formulae
+- Detect App Store installs when possible
+- Show version, size, source, security status, bundle ID, and path
 - Sort by item, version, size, source, security status, type, and duplicates
+- Search across name, source, security status, version, duplicate status, size, bundle ID, and path
+- Filter by install type and source
 - Show total size for the current filtered result set
 - Detect duplicate installed app copies and filter to duplicates only
-- Open app
-- Reveal app in Finder
-- Move app bundle to Trash with confirmation
-- Export the current filtered list as CSV or JSON
+- Open apps, reveal them in Finder, or move app bundles to Trash
+- Export the current view as CSV or JSON
 
-## Detection
+## Requirements
 
-- `brew list --cask` is used to build the Homebrew app list
-- `mas list` is used when `mas` is installed
-- `mdls -raw -name kMDItemAppStoreHasReceipt` is used as a fallback to detect App Store receipts
-- `codesign -dv --verbose=4` is used to classify apps as `App Store`, `Signed`, `Ad Hoc`, or `Unsigned`
-- Recursive bundle or cellar folder size is calculated locally for each scanned item
-- Homebrew matching is heuristic-based, similar to the original shell script
+- macOS 13 or later
+- Xcode or Swift Package Manager
+
+Optional tools:
+
+- `brew` for richer Homebrew detection
+- `mas` for richer App Store detection
+
+The app still works without `brew` or `mas`, but some items will fall back to `Manual / Unknown`.
+
+## Quick Start
+
+Clone the repo and run it locally:
+
+```bash
+git clone https://github.com/<your-account>/AppOrigins.git
+cd AppOrigins
+swift run
+```
 
 ## Open in Xcode
 
 1. Open Xcode.
 2. Choose `File > Open...`.
-3. Select [Package.swift](/Volumes/T7Shield/Developer/macos-apps/AppSourceScanner/Package.swift).
+3. Select `Package.swift`.
 4. Run the `AppOrigins` scheme.
 
-## Run from terminal
+## Build a DMG
+
+Build an unsigned local DMG:
 
 ```bash
-cd /Volumes/T7Shield/Developer/macos-apps/AppSourceScanner
-swift run
+./package-dmg.sh
 ```
 
-## Package As DMG
+That produces `AppOrigins.dmg` in the repo root.
 
-Build the release binary:
+You can override the version metadata if needed:
 
 ```bash
-cd /Volumes/T7Shield/Developer/macos-apps/AppSourceScanner
-swift build -c release
+APP_VERSION=1.0.0 BUILD_NUMBER=1 BUNDLE_IDENTIFIER=com.example.AppOrigins ./package-dmg.sh
 ```
 
-Create the app bundle:
+## GitHub Release Workflow
 
-```bash
-mkdir -p dist/AppOrigins.app/Contents/MacOS
-mkdir -p dist/AppOrigins.app/Contents/Resources
-cp .build/release/AppOrigins dist/AppOrigins.app/Contents/MacOS/AppOrigins
-chmod +x dist/AppOrigins.app/Contents/MacOS/AppOrigins
-cp assets/AppOrigins.icns dist/AppOrigins.app/Contents/Resources/AppOrigins.icns
-```
+This repo includes an unsigned release workflow at `.github/workflows/release-unsigned.yml`.
 
-Create `dist/AppOrigins.app/Contents/Info.plist`:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleExecutable</key>
-  <string>AppOrigins</string>
-  <key>CFBundleIdentifier</key>
-  <string>com.usamaansari.AppOrigins</string>
-  <key>CFBundleName</key>
-  <string>AppOrigins</string>
-  <key>CFBundleDisplayName</key>
-  <string>AppOrigins</string>
-  <key>CFBundlePackageType</key>
-  <string>APPL</string>
-  <key>CFBundleShortVersionString</key>
-  <string>1.0</string>
-  <key>CFBundleVersion</key>
-  <string>1</string>
-  <key>CFBundleIconFile</key>
-  <string>AppOrigins</string>
-  <key>LSMinimumSystemVersion</key>
-  <string>13.0</string>
-  <key>NSHighResolutionCapable</key>
-  <true/>
-</dict>
-</plist>
-```
-
-Create the DMG:
-
-```bash
-mkdir -p dmg
-cp -R dist/AppOrigins.app dmg/
-ln -s /Applications dmg/Applications
-hdiutil create -volname "AppOrigins" -srcfolder dmg -ov -format UDZO AppOrigins.dmg
-```
-
-Install locally:
-
-```bash
-open AppOrigins.dmg
-```
-
-If Gatekeeper blocks the app after copying it into `Applications`, either use `Right Click > Open` or run:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/AppOrigins.app
-```
-
-## Free GitHub Release Route
-
-You do not need the Apple Developer Program if you only want to upload an unsigned DMG for personal use.
-
-This repo now includes an unsigned release workflow at `.github/workflows/release-unsigned.yml`.
-
-To trigger it:
+Push a version tag:
 
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-That workflow builds `AppOrigins.dmg`, creates a SHA256 checksum, and uploads both files to the GitHub release for that tag.
+The workflow will:
 
-If you want to do it manually instead, you can still use:
+- build `AppOrigins.dmg`
+- generate a SHA-256 checksum
+- create or update the GitHub release for that tag
+
+## Unsigned Build Warning
+
+The generated app and DMG are unsigned and not notarized.
+
+macOS may warn users the first time they open the app. Typical local workarounds are:
+
+- `Right Click > Open`
+- removing quarantine after copying the app into `/Applications`
 
 ```bash
-./package-dmg.sh
+xattr -dr com.apple.quarantine /Applications/AppOrigins.app
 ```
 
-After building `AppOrigins.dmg`, create a GitHub release and upload it:
+## Detection Details
 
-```bash
-gh release create v0.1.0 AppOrigins.dmg --title "v0.1.0" --notes "Unsigned self-use build."
-```
+- `brew list --cask` is used to build the Homebrew app list
+- `brew list --formula` is used to enumerate Homebrew CLI tools
+- `mas list` is used when `mas` is installed
+- `mdls -raw -name kMDItemAppStoreHasReceipt` is used as an App Store fallback
+- `codesign -dv --verbose=4` is used to classify apps as `Signed`, `Ad Hoc`, or `Unsigned`
+- recursive bundle or cellar folder size is calculated locally for each scanned item
 
-Anyone downloading that release should expect the same unsigned-app warning on macOS.
+## Notes and Limitations
 
-## Notes
-
-- `Move to Trash` only trashes the `.app` bundle. It does not remove support files from `~/Library`.
-- If `brew` or `mas` are not installed, the app still works and falls back to receipt-based detection where possible.
-- The repo icon lives at `assets/apporigins-icon.svg`, and the macOS app bundle icon lives at `assets/AppOrigins.icns`.
+- `Move to Trash` only moves the `.app` bundle. It does not remove support files from `~/Library`.
+- The security column currently reflects signing state and App Store provenance. It does not perform standalone notarization verification yet.
+- Duplicate detection is currently focused on app bundles, using bundle identifier first and normalized app name as a fallback.
+- Homebrew and App Store matching are heuristic in some cases.
+- The repo icon lives at `assets/apporigins-icon.svg`, and the app bundle icon lives at `assets/AppOrigins.icns`.

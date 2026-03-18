@@ -40,5 +40,5 @@ jobs:
               AppOrigins.dmg \
               AppOrigins.dmg.sha256 \
               --title "$TAG_NAME" \
-              --notes "Unsigned self-use build."
+              --notes "Unsigned release build."
           fi
