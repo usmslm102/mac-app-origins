@@ -8,6 +8,8 @@ final class AppScannerViewModel: ObservableObject {
     @Published var searchText = ""
     @Published var selectedKindFilter: KindFilter = .all
     @Published var selectedSourceFilter: SourceFilter = .all
+    @Published var showDuplicatesOnly = false
+    @Published var sortOrder = [KeyPathComparator(\InstalledApp.name)]
     @Published var selectedAppID: InstalledApp.ID?
     @Published private(set) var isLoading = false
     @Published private(set) var lastError: String?
@@ -17,18 +19,23 @@ final class AppScannerViewModel: ObservableObject {
         apps.filter { app in
             let kindMatches = selectedKindFilter.kind.map { $0 == app.kind } ?? true
             let sourceMatches = selectedSourceFilter.source.map { $0 == app.source } ?? true
+            let duplicateMatches = !showDuplicatesOnly || app.hasDuplicates
             let searchMatches = searchText.isEmpty || [
                 app.name,
                 app.kind.rawValue,
                 app.bundleIdentifier,
                 app.version,
+                app.duplicateLabel,
+                app.hasDuplicates ? "duplicate" : "",
+                app.securityStatusLabel,
                 app.sizeLabel,
                 app.path,
                 app.source.rawValue
             ].contains { $0.localizedCaseInsensitiveContains(searchText) }
 
-            return kindMatches && sourceMatches && searchMatches
+            return kindMatches && sourceMatches && duplicateMatches && searchMatches
         }
+        .sorted(using: sortOrder)
     }
 
     var sourceSummary: String {
@@ -38,7 +45,30 @@ final class AppScannerViewModel: ObservableObject {
         let homebrewCount = grouped[.homebrew]?.count ?? 0
         let appStoreCount = grouped[.appStore]?.count ?? 0
         let manualCount = grouped[.manual]?.count ?? 0
-        return "\(apps.count) items, \(appCount) apps, \(cliCount) CLI, \(homebrewCount) Homebrew, \(appStoreCount) App Store, \(manualCount) manual"
+        let duplicateCount = apps.filter { $0.hasDuplicates }.count
+        return "\(apps.count) items, \(appCount) apps, \(cliCount) CLI, \(homebrewCount) Homebrew, \(appStoreCount) App Store, \(manualCount) manual, \(duplicateCount) duplicate copies"
+    }
+
+    var filteredSummary: String {
+        let visibleApps = filteredApps
+        let totalSize = visibleApps.compactMap(\.sizeInBytes).reduce(Int64(0), +)
+        let unknownSizeCount = visibleApps.filter { $0.sizeInBytes == nil }.count
+        let duplicateCount = visibleApps.filter { $0.hasDuplicates }.count
+
+        var parts = [
+            "\(visibleApps.count) shown",
+            "\(ByteCountFormatter.string(fromByteCount: totalSize, countStyle: .file)) total"
+        ]
+
+        if duplicateCount > 0 {
+            parts.append("\(duplicateCount) duplicates")
+        }
+
+        if unknownSizeCount > 0 {
+            parts.append("\(unknownSizeCount) unknown size")
+        }
+
+        return parts.joined(separator: " • ")
     }
 
     var selectedApp: InstalledApp? {
@@ -62,7 +92,11 @@ final class AppScannerViewModel: ObservableObject {
             scanner.scanApplications()
         }.value
 
-        apps = scannedApps.map(makeInstalledApp)
+        let installedApps = scannedApps.map(makeInstalledApp)
+        let duplicateCounts = makeDuplicateCounts(for: installedApps)
+        apps = installedApps.map { app in
+            app.withDuplicateCount(duplicateCounts[app.id] ?? 1)
+        }
         if let selectedAppID, !apps.contains(where: { $0.id == selectedAppID }) {
             self.selectedAppID = nil
         }
@@ -144,6 +178,8 @@ final class AppScannerViewModel: ObservableObject {
                 app.kind.rawValue,
                 app.bundleIdentifier,
                 app.version,
+                String(app.duplicateCount),
+                app.securityStatusLabel,
                 app.sizeLabel,
                 app.source.rawValue,
                 app.path
@@ -152,7 +188,7 @@ final class AppScannerViewModel: ObservableObject {
             .joined(separator: ",")
         }
 
-        let content = (["Name,Kind,Identifier,Version,Size,Source,Path"] + rows).joined(separator: "\n")
+        let content = (["Name,Kind,Identifier,Version,DuplicateCount,SecurityStatus,Size,Source,Path"] + rows).joined(separator: "\n")
         export(content: content.data(using: .utf8), defaultName: "installed-app-sources", fileExtension: "csv")
     }
 
@@ -220,6 +256,52 @@ final class AppScannerViewModel: ObservableObject {
         return FileManager.default.isDeletableFile(atPath: app.path)
     }
 
+    private func makeDuplicateCounts(for apps: [InstalledApp]) -> [InstalledApp.ID: Int] {
+        let keyedApps = apps.compactMap { app -> (InstalledApp, String)? in
+            guard let key = duplicateKey(for: app) else {
+                return nil
+            }
+
+            return (app, key)
+        }
+
+        let groups = Dictionary(grouping: keyedApps, by: { $0.1 })
+
+        return groups.values.reduce(into: [:]) { partialResult, group in
+            guard group.count > 1 else { return }
+
+            for (app, _) in group {
+                partialResult[app.id] = group.count
+            }
+        }
+    }
+
+    private func duplicateKey(for app: InstalledApp) -> String? {
+        guard app.kind == .application else {
+            return nil
+        }
+
+        let normalizedIdentifier = app.bundleIdentifier
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        if !normalizedIdentifier.isEmpty, normalizedIdentifier != "unknown" {
+            return "bundle:\(normalizedIdentifier)"
+        }
+
+        return "name:\(normalizedAppName(app.name))"
+    }
+
+    private func normalizedAppName(_ value: String) -> String {
+        value
+            .lowercased()
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
     private func cliIcon() -> NSImage {
         if let symbolImage = NSImage(systemSymbolName: "terminal", accessibilityDescription: "CLI Tool") {
             return symbolImage
@@ -273,6 +355,9 @@ struct ContentView: View {
                 Text("Installed Software Sources")
                     .font(.system(size: 24, weight: .semibold))
                 Text(viewModel.sourceSummary)
+                    .foregroundStyle(.secondary)
+                Text(viewModel.filteredSummary)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
             }
 
@@ -350,6 +435,14 @@ struct ContentView: View {
                 .frame(width: 420)
             }
 
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Duplicates")
+                    .font(.headline)
+
+                Toggle("Show duplicates only", isOn: $viewModel.showDuplicatesOnly)
+                    .toggleStyle(.switch)
+            }
+
             Spacer()
 
             Text("\(viewModel.filteredApps.count) shown")
@@ -367,8 +460,8 @@ struct ContentView: View {
     }
 
     private var table: some View {
-        Table(viewModel.filteredApps, selection: $viewModel.selectedAppID) {
-            TableColumn("Item") { app in
+        Table(viewModel.filteredApps, selection: $viewModel.selectedAppID, sortOrder: $viewModel.sortOrder) {
+            TableColumn("Item", value: \.name) { app in
                 HStack(spacing: 10) {
                     Image(nsImage: app.icon)
                         .resizable()
@@ -378,28 +471,40 @@ struct ContentView: View {
             }
             .width(min: 220, ideal: 260)
 
-            TableColumn("Version") { app in
+            TableColumn("Version", value: \.version) { app in
                 Text(app.version)
                     .foregroundStyle(.secondary)
             }
             .width(min: 110, ideal: 130)
 
-            TableColumn("Size") { app in
+            TableColumn("Size", value: \.sizeSortValue) { app in
                 Text(app.sizeLabel)
                     .foregroundStyle(.secondary)
             }
             .width(min: 90, ideal: 110)
 
-            TableColumn("Type") { app in
+            TableColumn("Source", value: \.sourceLabel) { app in
+                Text(app.source.rawValue)
+            }
+            .width(min: 130, ideal: 150)
+
+            TableColumn("Security", value: \.securityStatusLabel) { app in
+                Text(app.securityStatusLabel)
+                    .foregroundStyle(.secondary)
+            }
+            .width(min: 120, ideal: 140)
+
+            TableColumn("Type", value: \.typeLabel) { app in
                 Text(app.kind.rawValue)
                     .foregroundStyle(.secondary)
             }
             .width(min: 110, ideal: 120)
 
-            TableColumn("Source") { app in
-                Text(app.source.rawValue)
+            TableColumn("Dupes", value: \.duplicateCount) { app in
+                Text(app.hasDuplicates ? app.duplicateLabel : "—")
+                    .foregroundStyle(app.hasDuplicates ? .secondary : .tertiary)
             }
-            .width(min: 130, ideal: 150)
+            .width(min: 60, ideal: 70)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contextMenu(forSelectionType: InstalledApp.ID.self) { items in
@@ -444,6 +549,10 @@ struct ContentView: View {
 
                     detailRow("Type", value: app.kind.rawValue)
                     detailRow("Version", value: app.version)
+                    if app.hasDuplicates {
+                        detailRow("Duplicates", value: "\(app.duplicateCount) installed copies found")
+                    }
+                    detailRow("Security", value: app.securityStatusLabel)
                     detailRow("Size", value: app.sizeLabel)
                     detailRow(app.identifierLabel, value: app.bundleIdentifier)
                     detailRow("Path", value: app.path, mono: true)
@@ -510,7 +619,7 @@ struct ContentView: View {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
 
-            TextField("Search name, type, source, identifier, version, size, or path", text: $viewModel.searchText)
+            TextField("Search name, type, source, security, identifier, version, duplicates, size, or path", text: $viewModel.searchText)
                 .textFieldStyle(.plain)
                 .focused($searchFieldFocused)
 

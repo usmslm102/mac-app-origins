@@ -12,22 +12,32 @@ enum InstallKind: String, CaseIterable, Codable, Sendable {
     case cliTool = "CLI Tool"
 }
 
+enum SecurityStatus: String, CaseIterable, Codable, Sendable {
+    case appStore = "App Store"
+    case signed = "Signed"
+    case adHoc = "Ad Hoc"
+    case unsigned = "Unsigned"
+    case notApplicable = "Not Applicable"
+}
+
 struct ScannedApp: Identifiable, Sendable {
     let id: String
     let name: String
     let kind: InstallKind
     let bundleIdentifier: String
     let version: String
+    let securityStatus: SecurityStatus
     let sizeInBytes: Int64?
     let path: String
     let source: AppSource
 
-    init(name: String, kind: InstallKind, bundleIdentifier: String, version: String, sizeInBytes: Int64?, path: String, source: AppSource) {
+    init(name: String, kind: InstallKind, bundleIdentifier: String, version: String, securityStatus: SecurityStatus, sizeInBytes: Int64?, path: String, source: AppSource) {
         self.id = path
         self.name = name
         self.kind = kind
         self.bundleIdentifier = bundleIdentifier
         self.version = version
+        self.securityStatus = securityStatus
         self.sizeInBytes = sizeInBytes
         self.path = path
         self.source = source
@@ -40,17 +50,21 @@ struct InstalledApp: Identifiable {
     let kind: InstallKind
     let bundleIdentifier: String
     let version: String
+    let duplicateCount: Int
+    let securityStatus: SecurityStatus
     let sizeInBytes: Int64?
     let path: String
     let source: AppSource
     let icon: NSImage
 
-    init(name: String, kind: InstallKind, bundleIdentifier: String, version: String, sizeInBytes: Int64?, path: String, source: AppSource, icon: NSImage) {
+    init(name: String, kind: InstallKind, bundleIdentifier: String, version: String, duplicateCount: Int = 1, securityStatus: SecurityStatus, sizeInBytes: Int64?, path: String, source: AppSource, icon: NSImage) {
         self.id = path
         self.name = name
         self.kind = kind
         self.bundleIdentifier = bundleIdentifier
         self.version = version
+        self.duplicateCount = duplicateCount
+        self.securityStatus = securityStatus
         self.sizeInBytes = sizeInBytes
         self.path = path
         self.source = source
@@ -63,6 +77,8 @@ struct InstalledApp: Identifiable {
         self.kind = scannedApp.kind
         self.bundleIdentifier = scannedApp.bundleIdentifier
         self.version = scannedApp.version
+        self.duplicateCount = 1
+        self.securityStatus = scannedApp.securityStatus
         self.sizeInBytes = scannedApp.sizeInBytes
         self.path = scannedApp.path
         self.source = scannedApp.source
@@ -84,6 +100,45 @@ struct InstalledApp: Identifiable {
         }
 
         return ByteCountFormatter.string(fromByteCount: sizeInBytes, countStyle: .file)
+    }
+
+    var hasDuplicates: Bool {
+        duplicateCount > 1
+    }
+
+    var duplicateLabel: String {
+        hasDuplicates ? "\(duplicateCount)x" : ""
+    }
+
+    var typeLabel: String {
+        kind.rawValue
+    }
+
+    var sourceLabel: String {
+        source.rawValue
+    }
+
+    var securityStatusLabel: String {
+        securityStatus.rawValue
+    }
+
+    var sizeSortValue: Int64 {
+        sizeInBytes ?? -1
+    }
+
+    func withDuplicateCount(_ duplicateCount: Int) -> InstalledApp {
+        InstalledApp(
+            name: name,
+            kind: kind,
+            bundleIdentifier: bundleIdentifier,
+            version: version,
+            duplicateCount: duplicateCount,
+            securityStatus: securityStatus,
+            sizeInBytes: sizeInBytes,
+            path: path,
+            source: source,
+            icon: icon
+        )
     }
 }
 
@@ -133,6 +188,8 @@ struct ExportedApp: Codable {
     let kind: String
     let bundleIdentifier: String
     let version: String
+    let duplicateCount: Int
+    let securityStatus: String
     let size: String
     let sizeInBytes: Int64?
     let path: String
@@ -143,6 +200,8 @@ struct ExportedApp: Codable {
         kind = app.kind.rawValue
         bundleIdentifier = app.bundleIdentifier
         version = app.version
+        duplicateCount = app.duplicateCount
+        securityStatus = app.securityStatus.rawValue
         size = app.sizeLabel
         sizeInBytes = app.sizeInBytes
         path = app.path

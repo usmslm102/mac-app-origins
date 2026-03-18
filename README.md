@@ -19,9 +19,12 @@ macOS may warn you the first time you open it because it is not signed by an ide
 ## Current v1 features
 
 - Scans both `/Applications` and `~/Applications`
-- Shows app icon, version, size, bundle ID, source, and path
-- Search across app name, source, version, size, bundle ID, and path
+- Shows app icon, version, security status, size, bundle ID, source, and path
+- Search across app name, source, security status, version, duplicate status, size, bundle ID, and path
 - Filter by source
+- Sort by item, version, size, source, security status, type, and duplicates
+- Show total size for the current filtered result set
+- Detect duplicate installed app copies and filter to duplicates only
 - Open app
 - Reveal app in Finder
 - Move app bundle to Trash with confirmation
@@ -32,6 +35,7 @@ macOS may warn you the first time you open it because it is not signed by an ide
 - `brew list --cask` is used to build the Homebrew app list
 - `mas list` is used when `mas` is installed
 - `mdls -raw -name kMDItemAppStoreHasReceipt` is used as a fallback to detect App Store receipts
+- `codesign -dv --verbose=4` is used to classify apps as `App Store`, `Signed`, `Ad Hoc`, or `Unsigned`
 - Recursive bundle or cellar folder size is calculated locally for each scanned item
 - Homebrew matching is heuristic-based, similar to the original shell script
 

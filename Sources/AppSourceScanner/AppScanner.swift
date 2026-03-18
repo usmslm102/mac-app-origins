@@ -14,6 +14,7 @@ struct AppScanner {
                 kind: .application,
                 bundleIdentifier: bundleIdentifier(for: appURL),
                 version: version(for: appURL),
+                securityStatus: securityStatus(for: appURL, source: source),
                 sizeInBytes: allocatedSize(for: appURL),
                 path: appURL.path,
                 source: source
@@ -109,6 +110,7 @@ struct AppScanner {
                     kind: .cliTool,
                     bundleIdentifier: formula,
                     version: version,
+                    securityStatus: .notApplicable,
                     sizeInBytes: allocatedSize(for: URL(fileURLWithPath: path)),
                     path: path,
                     source: .homebrew
@@ -185,6 +187,35 @@ struct AppScanner {
         default:
             return "Unknown"
         }
+    }
+
+    private func securityStatus(for appURL: URL, source: AppSource) -> SecurityStatus {
+        if source == .appStore {
+            return .appStore
+        }
+
+        guard let result = Shell.runDetailed(
+            "/usr/bin/codesign",
+            arguments: ["-dv", "--verbose=4", appURL.path]
+        ) else {
+            return .unsigned
+        }
+
+        let output = result.combinedOutput.lowercased()
+
+        if result.terminationStatus != 0 {
+            if output.contains("not signed at all") || output.contains("code object is not signed") {
+                return .unsigned
+            }
+
+            return .unsigned
+        }
+
+        if output.contains("signature=adhoc") || output.contains("flags=0x2(adhoc)") || output.contains("flags=0x20002(adhoc") {
+            return .adHoc
+        }
+
+        return .signed
     }
 
     private func allocatedSize(for url: URL) -> Int64? {
@@ -280,6 +311,24 @@ struct AppScanner {
 }
 
 enum Shell {
+    struct Result {
+        let terminationStatus: Int32
+        let standardOutput: String
+        let standardError: String
+
+        var combinedOutput: String {
+            if standardOutput.isEmpty {
+                return standardError
+            }
+
+            if standardError.isEmpty {
+                return standardOutput
+            }
+
+            return "\(standardOutput)\n\(standardError)"
+        }
+    }
+
     private static let searchPaths = [
         "/opt/homebrew/bin",
         "/usr/local/bin",
@@ -290,6 +339,14 @@ enum Shell {
     ]
 
     static func run(_ command: String, arguments: [String]) -> String? {
+        guard let result = runDetailed(command, arguments: arguments), result.terminationStatus == 0 else {
+            return nil
+        }
+
+        return result.standardOutput
+    }
+
+    static func runDetailed(_ command: String, arguments: [String]) -> Result? {
         let process = Process()
         guard let executableURL = resolveExecutableURL(for: command) else {
             return nil
@@ -310,12 +367,14 @@ enum Shell {
             return nil
         }
 
-        guard process.terminationStatus == 0 else {
-            return nil
-        }
+        let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
+        let stderrData = stderr.fileHandleForReading.readDataToEndOfFile()
 
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        return String(data: data, encoding: .utf8)
+        return Result(
+            terminationStatus: process.terminationStatus,
+            standardOutput: String(data: stdoutData, encoding: .utf8) ?? "",
+            standardError: String(data: stderrData, encoding: .utf8) ?? ""
+        )
     }
 
     private static func resolveExecutableURL(for command: String) -> URL? {
