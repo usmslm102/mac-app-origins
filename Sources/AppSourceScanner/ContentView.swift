@@ -22,6 +22,7 @@ final class AppScannerViewModel: ObservableObject {
                 app.kind.rawValue,
                 app.bundleIdentifier,
                 app.version,
+                app.sizeLabel,
                 app.path,
                 app.source.rawValue
             ].contains { $0.localizedCaseInsensitiveContains(searchText) }
@@ -143,6 +144,7 @@ final class AppScannerViewModel: ObservableObject {
                 app.kind.rawValue,
                 app.bundleIdentifier,
                 app.version,
+                app.sizeLabel,
                 app.source.rawValue,
                 app.path
             ]
@@ -150,7 +152,7 @@ final class AppScannerViewModel: ObservableObject {
             .joined(separator: ",")
         }
 
-        let content = (["Name,Kind,Identifier,Version,Source,Path"] + rows).joined(separator: "\n")
+        let content = (["Name,Kind,Identifier,Version,Size,Source,Path"] + rows).joined(separator: "\n")
         export(content: content.data(using: .utf8), defaultName: "installed-app-sources", fileExtension: "csv")
     }
 
@@ -382,6 +384,12 @@ struct ContentView: View {
             }
             .width(min: 110, ideal: 130)
 
+            TableColumn("Size") { app in
+                Text(app.sizeLabel)
+                    .foregroundStyle(.secondary)
+            }
+            .width(min: 90, ideal: 110)
+
             TableColumn("Type") { app in
                 Text(app.kind.rawValue)
                     .foregroundStyle(.secondary)
@@ -436,6 +444,7 @@ struct ContentView: View {
 
                     detailRow("Type", value: app.kind.rawValue)
                     detailRow("Version", value: app.version)
+                    detailRow("Size", value: app.sizeLabel)
                     detailRow(app.identifierLabel, value: app.bundleIdentifier)
                     detailRow("Path", value: app.path, mono: true)
 
@@ -501,7 +510,7 @@ struct ContentView: View {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
 
-            TextField("Search name, type, source, identifier, version, or path", text: $viewModel.searchText)
+            TextField("Search name, type, source, identifier, version, size, or path", text: $viewModel.searchText)
                 .textFieldStyle(.plain)
                 .focused($searchFieldFocused)
 

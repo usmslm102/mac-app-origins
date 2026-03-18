@@ -14,6 +14,7 @@ struct AppScanner {
                 kind: .application,
                 bundleIdentifier: bundleIdentifier(for: appURL),
                 version: version(for: appURL),
+                sizeInBytes: allocatedSize(for: appURL),
                 path: appURL.path,
                 source: source
             )
@@ -108,6 +109,7 @@ struct AppScanner {
                     kind: .cliTool,
                     bundleIdentifier: formula,
                     version: version,
+                    sizeInBytes: allocatedSize(for: URL(fileURLWithPath: path)),
                     path: path,
                     source: .homebrew
                 )
@@ -183,6 +185,75 @@ struct AppScanner {
         default:
             return "Unknown"
         }
+    }
+
+    private func allocatedSize(for url: URL) -> Int64? {
+        let resourceKeys: Set<URLResourceKey> = [
+            .isDirectoryKey,
+            .isRegularFileKey,
+            .fileAllocatedSizeKey,
+            .totalFileAllocatedSizeKey,
+            .fileSizeKey
+        ]
+
+        guard let values = try? url.resourceValues(forKeys: resourceKeys) else {
+            return nil
+        }
+
+        if values.isRegularFile == true {
+            return fileSize(from: values)
+        }
+
+        if values.isDirectory == true {
+            return directoryAllocatedSize(for: url, resourceKeys: resourceKeys)
+        }
+
+        return fileSize(from: values)
+    }
+
+    private func directoryAllocatedSize(for directoryURL: URL, resourceKeys: Set<URLResourceKey>) -> Int64? {
+        guard let enumerator = FileManager.default.enumerator(
+            at: directoryURL,
+            includingPropertiesForKeys: Array(resourceKeys)
+        ) else {
+            return nil
+        }
+
+        var totalSize: Int64 = 0
+        var foundAnyEntry = false
+
+        for case let fileURL as URL in enumerator {
+            guard let values = try? fileURL.resourceValues(forKeys: resourceKeys) else {
+                continue
+            }
+
+            if values.isDirectory == true {
+                continue
+            }
+
+            if let fileSize = fileSize(from: values) {
+                totalSize += fileSize
+                foundAnyEntry = true
+            }
+        }
+
+        return foundAnyEntry ? totalSize : 0
+    }
+
+    private func fileSize(from values: URLResourceValues) -> Int64? {
+        if let totalAllocatedSize = values.totalFileAllocatedSize {
+            return Int64(totalAllocatedSize)
+        }
+
+        if let allocatedSize = values.fileAllocatedSize {
+            return Int64(allocatedSize)
+        }
+
+        if let fileSize = values.fileSize {
+            return Int64(fileSize)
+        }
+
+        return nil
     }
 
     private func normalize(_ value: String) -> String {

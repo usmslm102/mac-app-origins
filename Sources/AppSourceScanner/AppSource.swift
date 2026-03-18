@@ -18,15 +18,17 @@ struct ScannedApp: Identifiable, Sendable {
     let kind: InstallKind
     let bundleIdentifier: String
     let version: String
+    let sizeInBytes: Int64?
     let path: String
     let source: AppSource
 
-    init(name: String, kind: InstallKind, bundleIdentifier: String, version: String, path: String, source: AppSource) {
+    init(name: String, kind: InstallKind, bundleIdentifier: String, version: String, sizeInBytes: Int64?, path: String, source: AppSource) {
         self.id = path
         self.name = name
         self.kind = kind
         self.bundleIdentifier = bundleIdentifier
         self.version = version
+        self.sizeInBytes = sizeInBytes
         self.path = path
         self.source = source
     }
@@ -38,16 +40,18 @@ struct InstalledApp: Identifiable {
     let kind: InstallKind
     let bundleIdentifier: String
     let version: String
+    let sizeInBytes: Int64?
     let path: String
     let source: AppSource
     let icon: NSImage
 
-    init(name: String, kind: InstallKind, bundleIdentifier: String, version: String, path: String, source: AppSource, icon: NSImage) {
+    init(name: String, kind: InstallKind, bundleIdentifier: String, version: String, sizeInBytes: Int64?, path: String, source: AppSource, icon: NSImage) {
         self.id = path
         self.name = name
         self.kind = kind
         self.bundleIdentifier = bundleIdentifier
         self.version = version
+        self.sizeInBytes = sizeInBytes
         self.path = path
         self.source = source
         self.icon = icon
@@ -59,6 +63,7 @@ struct InstalledApp: Identifiable {
         self.kind = scannedApp.kind
         self.bundleIdentifier = scannedApp.bundleIdentifier
         self.version = scannedApp.version
+        self.sizeInBytes = scannedApp.sizeInBytes
         self.path = scannedApp.path
         self.source = scannedApp.source
         self.icon = icon
@@ -71,6 +76,14 @@ struct InstalledApp: Identifiable {
         case .cliTool:
             return "Formula"
         }
+    }
+
+    var sizeLabel: String {
+        guard let sizeInBytes else {
+            return "Unknown"
+        }
+
+        return ByteCountFormatter.string(fromByteCount: sizeInBytes, countStyle: .file)
     }
 }
 
@@ -120,6 +133,8 @@ struct ExportedApp: Codable {
     let kind: String
     let bundleIdentifier: String
     let version: String
+    let size: String
+    let sizeInBytes: Int64?
     let path: String
     let source: String
 
@@ -128,6 +143,8 @@ struct ExportedApp: Codable {
         kind = app.kind.rawValue
         bundleIdentifier = app.bundleIdentifier
         version = app.version
+        size = app.sizeLabel
+        sizeInBytes = app.sizeInBytes
         path = app.path
         source = app.source.rawValue
     }
