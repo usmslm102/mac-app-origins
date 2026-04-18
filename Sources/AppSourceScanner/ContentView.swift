@@ -1,25 +1,105 @@
 import AppKit
+import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
+enum RefreshMode: String, CaseIterable, Identifiable {
+    case quick = "Quick"
+    case full = "Full"
+
+    var id: Self { self }
+
+    var scanMode: ScanMode {
+        switch self {
+        case .quick:
+            return .quick
+        case .full:
+            return .full
+        }
+    }
+
+    var actionLabel: String {
+        switch self {
+        case .quick:
+            return "Quick Refresh"
+        case .full:
+            return "Full Rescan"
+        }
+    }
+}
+
 @MainActor
 final class AppScannerViewModel: ObservableObject {
+    private enum DefaultsKey {
+        static let includeSystemApplications = "scan.includeSystemApplications"
+        static let includeUserApplications = "scan.includeUserApplications"
+        static let includeExternalVolumes = "scan.includeExternalVolumes"
+        static let defaultRefreshMode = "scan.defaultRefreshMode"
+    }
+
+    private let defaults: UserDefaults
+    private var refreshTask: Task<Void, Never>?
+    private var refreshGeneration = 0
+    private var iconCache: [String: NSImage] = [:]
+
     @Published private(set) var apps: [InstalledApp] = []
     @Published var searchText = ""
     @Published var selectedKindFilter: KindFilter = .all
-    @Published var selectedSourceFilter: SourceFilter = .all
+    @Published var selectedSourceTab: SourceTab = .all
     @Published var showDuplicatesOnly = false
+    @Published var showExternalOnly = false
+    @Published var defaultRefreshMode: RefreshMode = .quick {
+        didSet {
+            guard defaultRefreshMode != oldValue else { return }
+            defaults.set(defaultRefreshMode.rawValue, forKey: DefaultsKey.defaultRefreshMode)
+        }
+    }
+    @Published var includeSystemApplications = true {
+        didSet {
+            guard includeSystemApplications != oldValue else { return }
+            persistScanScopeAndRefresh()
+        }
+    }
+    @Published var includeUserApplications = true {
+        didSet {
+            guard includeUserApplications != oldValue else { return }
+            persistScanScopeAndRefresh()
+        }
+    }
+    @Published var includeExternalVolumes = false {
+        didSet {
+            guard includeExternalVolumes != oldValue else { return }
+            persistScanScopeAndRefresh()
+        }
+    }
     @Published var sortOrder = [KeyPathComparator(\InstalledApp.name)]
     @Published var selectedAppID: InstalledApp.ID?
     @Published private(set) var isLoading = false
     @Published private(set) var lastError: String?
     @Published private(set) var pendingTrashApp: InstalledApp?
+    @Published private(set) var lastScanDate: Date?
+    @Published private(set) var lastRefreshMode: RefreshMode = .quick
+    @Published private(set) var lastScanDuration: TimeInterval?
+    @Published private(set) var lastCacheHits = 0
+    @Published private(set) var lastCacheMisses = 0
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        includeSystemApplications = defaults.object(forKey: DefaultsKey.includeSystemApplications) as? Bool ?? true
+        includeUserApplications = defaults.object(forKey: DefaultsKey.includeUserApplications) as? Bool ?? true
+        includeExternalVolumes = defaults.object(forKey: DefaultsKey.includeExternalVolumes) as? Bool ?? false
+        if let rawMode = defaults.string(forKey: DefaultsKey.defaultRefreshMode),
+           let refreshMode = RefreshMode(rawValue: rawMode) {
+            defaultRefreshMode = refreshMode
+        }
+    }
 
     var filteredApps: [InstalledApp] {
         apps.filter { app in
             let kindMatches = selectedKindFilter.kind.map { $0 == app.kind } ?? true
-            let sourceMatches = selectedSourceFilter.source.map { $0 == app.source } ?? true
+            let sourceMatches = selectedSourceTab.source.map { $0 == app.source } ?? true
             let duplicateMatches = !showDuplicatesOnly || app.hasDuplicates
+            let externalMatches = !showExternalOnly || app.isExternal
             let searchMatches = searchText.isEmpty || [
                 app.name,
                 app.kind.rawValue,
@@ -27,13 +107,14 @@ final class AppScannerViewModel: ObservableObject {
                 app.version,
                 app.duplicateLabel,
                 app.hasDuplicates ? "duplicate" : "",
+                app.location,
                 app.securityStatusLabel,
                 app.sizeLabel,
                 app.path,
                 app.source.rawValue
             ].contains { $0.localizedCaseInsensitiveContains(searchText) }
 
-            return kindMatches && sourceMatches && duplicateMatches && searchMatches
+            return kindMatches && sourceMatches && duplicateMatches && externalMatches && searchMatches
         }
         .sorted(using: sortOrder)
     }
@@ -46,7 +127,8 @@ final class AppScannerViewModel: ObservableObject {
         let appStoreCount = grouped[.appStore]?.count ?? 0
         let manualCount = grouped[.manual]?.count ?? 0
         let duplicateCount = apps.filter { $0.hasDuplicates }.count
-        return "\(apps.count) items, \(appCount) apps, \(cliCount) CLI, \(homebrewCount) Homebrew, \(appStoreCount) App Store, \(manualCount) manual, \(duplicateCount) duplicate copies"
+        let externalCount = apps.filter(\.isExternal).count
+        return "\(apps.count) items, \(appCount) apps, \(cliCount) CLI, \(homebrewCount) Homebrew, \(appStoreCount) App Store, \(manualCount) manual, \(externalCount) external, \(duplicateCount) duplicate copies"
     }
 
     var filteredSummary: String {
@@ -71,6 +153,44 @@ final class AppScannerViewModel: ObservableObject {
         return parts.joined(separator: " • ")
     }
 
+    var scanScopeSummary: String {
+        var activeRoots: [String] = []
+        if includeSystemApplications {
+            activeRoots.append("/Applications")
+        }
+        if includeUserApplications {
+            activeRoots.append("~/Applications")
+        }
+        if includeExternalVolumes {
+            activeRoots.append("External volumes")
+        }
+
+        return activeRoots.isEmpty
+            ? "No scan roots selected"
+            : "Scanning: \(activeRoots.joined(separator: ", "))"
+    }
+
+    var lastScanLabel: String {
+        guard let lastScanDate else {
+            return "No scan completed yet"
+        }
+
+        let base = "Last \(lastRefreshMode.rawValue.lowercased()) scan: \(lastScanDate.formatted(date: .omitted, time: .shortened))"
+        guard let lastScanDuration else {
+            return base
+        }
+
+        return "\(base) (\(String(format: "%.1fs", lastScanDuration)))"
+    }
+
+    var scanPerformanceLabel: String {
+        guard lastCacheHits + lastCacheMisses > 0 else {
+            return "Metadata cache: no samples yet"
+        }
+
+        return "Metadata cache: \(lastCacheHits) hits • \(lastCacheMisses) recalculated"
+    }
+
     var selectedApp: InstalledApp? {
         app(for: selectedAppID)
     }
@@ -83,15 +203,61 @@ final class AppScannerViewModel: ObservableObject {
         canTrashApp(withID: selectedAppID)
     }
 
-    func refresh() async {
+    var selectedItemCanOpenInTerminal: Bool {
+        canOpenInTerminal(withID: selectedAppID)
+    }
+
+    func refresh() {
+        refresh(mode: defaultRefreshMode)
+    }
+
+    func refreshQuick() {
+        refresh(mode: .quick)
+    }
+
+    func refreshFull() {
+        refresh(mode: .full)
+    }
+
+    private func refresh(mode: RefreshMode) {
+        refreshTask?.cancel()
+        refreshGeneration += 1
+        let generation = refreshGeneration
+
+        refreshTask = Task { [weak self] in
+            await self?.performRefresh(generation: generation, mode: mode)
+        }
+    }
+
+    private func performRefresh(generation: Int, mode: RefreshMode) async {
         isLoading = true
         lastError = nil
+        let scanStart = Date()
 
         let scanner = AppScanner()
-        let scannedApps = await Task.detached(priority: .userInitiated) {
-            scanner.scanApplications()
-        }.value
+        let options = ScanOptions(
+            includeSystemApplications: includeSystemApplications,
+            includeUserApplications: includeUserApplications,
+            includeExternalVolumes: includeExternalVolumes
+        )
 
+        let scanTask = Task.detached(priority: .userInitiated) {
+            await scanner.scanApplications(options: options, mode: mode.scanMode)
+        }
+        let scanResult = await withTaskCancellationHandler {
+            await scanTask.value
+        } onCancel: {
+            scanTask.cancel()
+        }
+
+        guard !Task.isCancelled, generation == refreshGeneration else {
+            if generation == refreshGeneration {
+                isLoading = false
+            }
+            return
+        }
+
+        let scannedApps = scanResult.apps
         let installedApps = scannedApps.map(makeInstalledApp)
         let duplicateCounts = makeDuplicateCounts(for: installedApps)
         apps = installedApps.map { app in
@@ -100,6 +266,12 @@ final class AppScannerViewModel: ObservableObject {
         if let selectedAppID, !apps.contains(where: { $0.id == selectedAppID }) {
             self.selectedAppID = nil
         }
+
+        lastScanDate = Date()
+        lastScanDuration = lastScanDate?.timeIntervalSince(scanStart)
+        lastRefreshMode = mode
+        lastCacheHits = scanResult.cacheHits
+        lastCacheMisses = scanResult.cacheMisses
         isLoading = false
     }
 
@@ -108,8 +280,15 @@ final class AppScannerViewModel: ObservableObject {
     }
 
     func openApp(withID appID: InstalledApp.ID?) {
-        guard let app = app(for: appID), canOpen(app) else { return }
-        NSWorkspace.shared.open(URL(fileURLWithPath: app.path))
+        guard let app = app(for: appID), canOpen(app) else {
+            lastError = "This item is not available to open."
+            return
+        }
+
+        guard NSWorkspace.shared.open(URL(fileURLWithPath: app.path)) else {
+            lastError = "Could not open \(app.name)."
+            return
+        }
     }
 
     func revealSelectedApp() {
@@ -117,8 +296,59 @@ final class AppScannerViewModel: ObservableObject {
     }
 
     func revealApp(withID appID: InstalledApp.ID?) {
-        guard let app = app(for: appID) else { return }
+        guard let app = app(for: appID) else {
+            return
+        }
+        guard FileManager.default.fileExists(atPath: app.path) else {
+            lastError = "\(app.name) is no longer available at its previous path."
+            return
+        }
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: app.path)])
+    }
+
+    func openSelectedInTerminal() {
+        openInTerminal(withID: selectedAppID)
+    }
+
+    func openInTerminal(withID appID: InstalledApp.ID?) {
+        guard let app = app(for: appID) else {
+            return
+        }
+
+        let targetPath: String
+        if app.kind == .application {
+            targetPath = URL(fileURLWithPath: app.path).deletingLastPathComponent().path
+        } else {
+            targetPath = app.path
+        }
+
+        guard FileManager.default.fileExists(atPath: targetPath) else {
+            lastError = "Cannot open Terminal because \(targetPath) is not accessible."
+            return
+        }
+
+        guard Shell.run("open", arguments: ["-a", "Terminal", targetPath]) != nil else {
+            lastError = "Could not open Terminal at \(targetPath)."
+            return
+        }
+    }
+
+    func copySelectedPath() {
+        copyPath(withID: selectedAppID)
+    }
+
+    func copySelectedIdentifier() {
+        copyIdentifier(withID: selectedAppID)
+    }
+
+    func copyPath(withID appID: InstalledApp.ID?) {
+        guard let app = app(for: appID) else { return }
+        copyToPasteboard(app.path)
+    }
+
+    func copyIdentifier(withID appID: InstalledApp.ID?) {
+        guard let app = app(for: appID) else { return }
+        copyToPasteboard(app.bundleIdentifier)
     }
 
     func confirmMoveSelectedAppToTrash() {
@@ -126,7 +356,16 @@ final class AppScannerViewModel: ObservableObject {
     }
 
     func confirmMoveAppToTrash(withID appID: InstalledApp.ID?) {
-        guard let app = app(for: appID), canTrash(app) else {
+        guard let app = app(for: appID) else {
+            return
+        }
+
+        guard FileManager.default.fileExists(atPath: app.path) else {
+            lastError = "\(app.name) is no longer available at its previous path."
+            return
+        }
+
+        guard canTrash(app) else {
             lastError = "You do not have permission to move this app to Trash."
             return
         }
@@ -146,7 +385,7 @@ final class AppScannerViewModel: ObservableObject {
             let appURL = URL(fileURLWithPath: pendingTrashApp.path)
             _ = try FileManager.default.trashItem(at: appURL, resultingItemURL: nil)
             self.pendingTrashApp = nil
-            await refresh()
+            refresh()
         } catch {
             lastError = "Could not move \(pendingTrashApp.name) to Trash."
             self.pendingTrashApp = nil
@@ -171,6 +410,11 @@ final class AppScannerViewModel: ObservableObject {
         return canTrash(app)
     }
 
+    func canOpenInTerminal(withID appID: InstalledApp.ID?) -> Bool {
+        guard let app = app(for: appID) else { return false }
+        return canOpenInTerminal(app)
+    }
+
     func exportCSV() {
         let rows = filteredApps.map { app in
             [
@@ -182,13 +426,14 @@ final class AppScannerViewModel: ObservableObject {
                 app.securityStatusLabel,
                 app.sizeLabel,
                 app.source.rawValue,
+                app.location,
                 app.path
             ]
             .map(csvField)
             .joined(separator: ",")
         }
 
-        let content = (["Name,Kind,Identifier,Version,DuplicateCount,SecurityStatus,Size,Source,Path"] + rows).joined(separator: "\n")
+        let content = (["Name,Kind,Identifier,Version,DuplicateCount,SecurityStatus,Size,Source,Location,Path"] + rows).joined(separator: "\n")
         export(content: content.data(using: .utf8), defaultName: "installed-app-sources", fileExtension: "csv")
     }
 
@@ -231,6 +476,10 @@ final class AppScannerViewModel: ObservableObject {
     }
 
     private func makeInstalledApp(from scannedApp: ScannedApp) -> InstalledApp {
+        if let cachedIcon = iconCache[scannedApp.path] {
+            return InstalledApp(scannedApp: scannedApp, icon: cachedIcon)
+        }
+
         let icon: NSImage
         switch scannedApp.kind {
         case .application:
@@ -238,8 +487,16 @@ final class AppScannerViewModel: ObservableObject {
         case .cliTool:
             icon = cliIcon()
         }
+        iconCache[scannedApp.path] = icon
 
         return InstalledApp(scannedApp: scannedApp, icon: icon)
+    }
+
+    private func persistScanScopeAndRefresh() {
+        defaults.set(includeSystemApplications, forKey: DefaultsKey.includeSystemApplications)
+        defaults.set(includeUserApplications, forKey: DefaultsKey.includeUserApplications)
+        defaults.set(includeExternalVolumes, forKey: DefaultsKey.includeExternalVolumes)
+        refresh()
     }
 
     private func app(for appID: InstalledApp.ID?) -> InstalledApp? {
@@ -248,12 +505,31 @@ final class AppScannerViewModel: ObservableObject {
     }
 
     private func canOpen(_ app: InstalledApp) -> Bool {
-        app.kind == .application
+        guard app.kind == .application else { return false }
+        return FileManager.default.fileExists(atPath: app.path)
     }
 
     private func canTrash(_ app: InstalledApp) -> Bool {
         guard app.kind == .application else { return false }
+        guard FileManager.default.fileExists(atPath: app.path) else { return false }
         return FileManager.default.isDeletableFile(atPath: app.path)
+    }
+
+    private func canOpenInTerminal(_ app: InstalledApp) -> Bool {
+        let path: String
+        if app.kind == .application {
+            path = URL(fileURLWithPath: app.path).deletingLastPathComponent().path
+        } else {
+            path = app.path
+        }
+
+        return FileManager.default.fileExists(atPath: path)
+    }
+
+    private func copyToPasteboard(_ value: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(value, forType: .string)
     }
 
     private func makeDuplicateCounts(for apps: [InstalledApp]) -> [InstalledApp.ID: Int] {
@@ -277,29 +553,11 @@ final class AppScannerViewModel: ObservableObject {
     }
 
     private func duplicateKey(for app: InstalledApp) -> String? {
-        guard app.kind == .application else {
-            return nil
-        }
-
-        let normalizedIdentifier = app.bundleIdentifier
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-
-        if !normalizedIdentifier.isEmpty, normalizedIdentifier != "unknown" {
-            return "bundle:\(normalizedIdentifier)"
-        }
-
-        return "name:\(normalizedAppName(app.name))"
-    }
-
-    private func normalizedAppName(_ value: String) -> String {
-        value
-            .lowercased()
-            .replacingOccurrences(of: "-", with: " ")
-            .replacingOccurrences(of: "_", with: " ")
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
+        ScannerLogic.duplicateKey(
+            kind: app.kind,
+            bundleIdentifier: app.bundleIdentifier,
+            name: app.name
+        )
     }
 
     private func cliIcon() -> NSImage {
@@ -356,8 +614,17 @@ struct ContentView: View {
                     .font(.system(size: 24, weight: .semibold))
                 Text(viewModel.sourceSummary)
                     .foregroundStyle(.secondary)
+                Text(viewModel.scanScopeSummary)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
                 Text(viewModel.filteredSummary)
                     .font(.callout)
+                    .foregroundStyle(.secondary)
+                Text(viewModel.lastScanLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(viewModel.scanPerformanceLabel)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
@@ -367,86 +634,135 @@ struct ContentView: View {
                 searchField
 
                 HStack(spacing: 10) {
-                    if viewModel.isLoading {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            if viewModel.isLoading {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
 
-                    Menu("Export") {
-                        Button("Export CSV") {
-                            viewModel.exportCSV()
+                            Menu("Export") {
+                                Button("Export CSV") {
+                                    viewModel.exportCSV()
+                                }
+                                Button("Export JSON") {
+                                    viewModel.exportJSON()
+                                }
+                            }
+
+                            Menu("Copy") {
+                                Button("Copy Path") {
+                                    viewModel.copySelectedPath()
+                                }
+                                .disabled(viewModel.selectedApp == nil)
+
+                                Button("Copy Identifier") {
+                                    viewModel.copySelectedIdentifier()
+                                }
+                                .disabled(viewModel.selectedApp == nil)
+                            }
+
+                            Menu("Scan roots") {
+                                Toggle("/Applications", isOn: $viewModel.includeSystemApplications)
+                                Toggle("~/Applications", isOn: $viewModel.includeUserApplications)
+                                Toggle("External volumes", isOn: $viewModel.includeExternalVolumes)
+                                Divider()
+                                Picker("Default refresh", selection: $viewModel.defaultRefreshMode) {
+                                    ForEach(RefreshMode.allCases) { mode in
+                                        Text(mode.actionLabel).tag(mode)
+                                    }
+                                }
+                            }
+
+                            Button("Open") {
+                                viewModel.openSelectedApp()
+                            }
+                            .disabled(!viewModel.selectedItemCanOpen)
+
+                            Button("Reveal") {
+                                viewModel.revealSelectedApp()
+                            }
+                            .disabled(viewModel.selectedApp == nil)
+
+                            Button("Terminal") {
+                                viewModel.openSelectedInTerminal()
+                            }
+                            .disabled(!viewModel.selectedItemCanOpenInTerminal)
+
+                            Button("Trash") {
+                                viewModel.confirmMoveSelectedAppToTrash()
+                            }
+                            .disabled(!viewModel.selectedItemCanTrash)
                         }
-                        Button("Export JSON") {
-                            viewModel.exportJSON()
+                    }
+
+                    Menu("Refresh") {
+                        Button("Quick Refresh") {
+                            viewModel.refreshQuick()
+                        }
+                        .keyboardShortcut("r", modifiers: [.command])
+
+                        Button("Full Rescan") {
+                            viewModel.refreshFull()
                         }
                     }
-
-                    Button("Open") {
-                        viewModel.openSelectedApp()
-                    }
-                    .disabled(!viewModel.selectedItemCanOpen)
-
-                    Button("Reveal") {
-                        viewModel.revealSelectedApp()
-                    }
-                    .disabled(viewModel.selectedApp == nil)
-
-                    Button("Trash") {
-                        viewModel.confirmMoveSelectedAppToTrash()
-                    }
-                    .disabled(!viewModel.selectedItemCanTrash)
-
-                    Button("Refresh") {
-                        Task {
-                            await viewModel.refresh()
-                        }
-                    }
-                    .keyboardShortcut("r", modifiers: [.command])
                 }
+                .frame(maxWidth: 720, alignment: .trailing)
             }
         }
     }
 
     private var filters: some View {
-        HStack(alignment: .top, spacing: 18) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Type")
-                    .font(.headline)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 18) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Type")
+                        .font(.headline)
 
-                Picker("Type", selection: $viewModel.selectedKindFilter) {
-                    ForEach(KindFilter.allCases) { filter in
-                        Text(filter.rawValue).tag(filter)
+                    Picker("Type", selection: $viewModel.selectedKindFilter) {
+                        ForEach(KindFilter.allCases) { filter in
+                            Text(filter.rawValue).tag(filter)
+                        }
                     }
+                    .pickerStyle(.segmented)
+                    .frame(width: 280)
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 280)
-            }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Source")
-                    .font(.headline)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Source")
+                        .font(.headline)
 
-                Picker("Source", selection: $viewModel.selectedSourceFilter) {
-                    ForEach(SourceFilter.allCases) { filter in
-                        Text(filter.rawValue).tag(filter)
+                    Picker("Source", selection: $viewModel.selectedSourceTab) {
+                        ForEach(SourceTab.allCases) { tab in
+                            Text(tab.rawValue).tag(tab)
+                        }
                     }
+                    .pickerStyle(.segmented)
+                    .frame(width: 520)
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 420)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Duplicates")
+                        .font(.headline)
+
+                    Toggle("Show duplicates only", isOn: $viewModel.showDuplicatesOnly)
+                        .toggleStyle(.switch)
+                        .fixedSize()
+                }
+                .frame(minWidth: 170, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Storage")
+                        .font(.headline)
+
+                    Toggle("Show external only", isOn: $viewModel.showExternalOnly)
+                        .toggleStyle(.switch)
+                        .fixedSize()
+                }
+                .frame(minWidth: 160, alignment: .leading)
+
             }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Duplicates")
-                    .font(.headline)
-
-                Toggle("Show duplicates only", isOn: $viewModel.showDuplicatesOnly)
-                    .toggleStyle(.switch)
-            }
-
-            Spacer()
-
-            Text("\(viewModel.filteredApps.count) shown")
-                .foregroundStyle(.secondary)
+            .fixedSize(horizontal: true, vertical: false)
         }
     }
 
@@ -488,6 +804,12 @@ struct ContentView: View {
             }
             .width(min: 130, ideal: 150)
 
+            TableColumn("Location", value: \.locationLabel) { app in
+                Text(app.location)
+                    .foregroundStyle(.secondary)
+            }
+            .width(min: 150, ideal: 170)
+
             TableColumn("Security", value: \.securityStatusLabel) { app in
                 Text(app.securityStatusLabel)
                     .foregroundStyle(.secondary)
@@ -519,6 +841,19 @@ struct ContentView: View {
                 viewModel.revealApp(withID: targetAppID)
             }
             .disabled(targetAppID == nil)
+            Button("Open in Terminal") {
+                viewModel.openInTerminal(withID: targetAppID)
+            }
+            .disabled(!viewModel.canOpenInTerminal(withID: targetAppID))
+            Divider()
+            Button("Copy Path") {
+                viewModel.copyPath(withID: targetAppID)
+            }
+            .disabled(targetAppID == nil)
+            Button("Copy Identifier") {
+                viewModel.copyIdentifier(withID: targetAppID)
+            }
+            .disabled(targetAppID == nil)
             Divider()
             Button("Move to Trash", role: .destructive) {
                 viewModel.confirmMoveAppToTrash(withID: targetAppID)
@@ -544,6 +879,9 @@ struct ContentView: View {
                                 .font(.title3.weight(.semibold))
                             Text("\(app.kind.rawValue) • \(app.source.rawValue)")
                                 .foregroundStyle(.secondary)
+                            Text(app.location)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
 
@@ -554,13 +892,14 @@ struct ContentView: View {
                     }
                     detailRow("Security", value: app.securityStatusLabel)
                     detailRow("Size", value: app.sizeLabel)
+                    detailRow("Location", value: app.location)
                     detailRow(app.identifierLabel, value: app.bundleIdentifier)
                     detailRow("Path", value: app.path, mono: true)
 
                     Spacer()
                 }
                 .padding(18)
-                .frame(minWidth: 280, idealWidth: 320, maxWidth: 360, maxHeight: .infinity, alignment: .topLeading)
+                .frame(minWidth: 240, idealWidth: 280, maxWidth: 320, maxHeight: .infinity, alignment: .topLeading)
                 .background(Color(nsColor: .controlBackgroundColor))
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             } else {
@@ -574,7 +913,7 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 }
                 .padding(18)
-                .frame(minWidth: 280, idealWidth: 320, maxWidth: 360, maxHeight: .infinity, alignment: .topLeading)
+                .frame(minWidth: 240, idealWidth: 280, maxWidth: 320, maxHeight: .infinity, alignment: .topLeading)
                 .background(Color(nsColor: .controlBackgroundColor))
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
@@ -619,7 +958,7 @@ struct ContentView: View {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
 
-            TextField("Search name, type, source, security, identifier, version, duplicates, size, or path", text: $viewModel.searchText)
+            TextField("Search name, type, source, location, security, identifier, version, duplicates, size, or path", text: $viewModel.searchText)
                 .textFieldStyle(.plain)
                 .focused($searchFieldFocused)
 
@@ -636,7 +975,7 @@ struct ContentView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .frame(width: 420)
+        .frame(minWidth: 280, idealWidth: 360, maxWidth: 420)
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay {
