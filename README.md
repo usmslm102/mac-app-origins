@@ -6,7 +6,7 @@
 
 AppOrigins is a native macOS SwiftUI utility for inspecting installed software and where it came from.
 
-It scans your installed apps and Homebrew formulae, then surfaces:
+It scans your installed apps and Homebrew packages, then surfaces:
 
 - source: `Homebrew`, `App Store`, or `Manual / Unknown`
 - install type: app bundle or CLI tool
@@ -23,15 +23,18 @@ It scans your installed apps and Homebrew formulae, then surfaces:
 ## Features
 
 - Scan `/Applications` and `~/Applications`
+- Optional external-volume scanning (`/Volumes/*/Applications`, opt-in)
 - Detect Homebrew casks and formulae
 - Detect App Store installs when possible
-- Show version, size, source, security status, bundle ID, and path
+- Show version, size, source, location, security status, bundle ID, and path
 - Sort by item, version, size, source, security status, type, and duplicates
-- Search across name, source, security status, version, duplicate status, size, bundle ID, and path
-- Filter by install type and source
+- Search across name, source, location, security status, version, duplicate status, size, bundle ID, and path
+- Filter by install type and source tabs
+- Filter to external installs only
+- Choose quick refresh (cached metadata) or full rescan
 - Show total size for the current filtered result set
 - Detect duplicate installed app copies and filter to duplicates only
-- Open apps, reveal them in Finder, or move app bundles to Trash
+- Open apps, reveal them in Finder, open locations in Terminal, copy path/identifier, or move app bundles to Trash
 - Export the current view as CSV or JSON
 
 ## Requirements
@@ -44,7 +47,7 @@ Optional tools:
 - `brew` for richer Homebrew detection
 - `mas` for richer App Store detection
 
-The app still works without `brew` or `mas`, but some items will fall back to `Manual / Unknown`.
+The app still works without these tools, but related detections will be unavailable and some items may fall back to `Manual / Unknown`.
 
 ## Quick Start
 
@@ -121,6 +124,7 @@ xattr -dr com.apple.quarantine /Applications/AppOrigins.app
 ## Notes and Limitations
 
 - `Move to Trash` only moves the `.app` bundle. It does not remove support files from `~/Library`.
+- External-volume scanning is opt-in and currently scans known app folders (`/Volumes/*/Applications`) only.
 - The security column currently reflects signing state and App Store provenance. It does not perform standalone notarization verification yet.
 - Duplicate detection is currently focused on app bundles, using bundle identifier first and normalized app name as a fallback.
 - Homebrew and App Store matching are heuristic in some cases.

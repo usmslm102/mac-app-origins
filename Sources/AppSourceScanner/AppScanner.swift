@@ -1,29 +1,75 @@
 import Foundation
 
-struct AppScanner {
-    func scanApplications() -> [ScannedApp] {
-        let brewApps = loadBrewCasks()
-        let appStoreApps = loadMasApps()
-        let applicationURLs = loadApplicationURLs()
+struct ScanOptions: Sendable {
+    let includeSystemApplications: Bool
+    let includeUserApplications: Bool
+    let includeExternalVolumes: Bool
 
-        let applications = applicationURLs.compactMap { appURL in
-            let appName = appURL.deletingPathExtension().lastPathComponent
-            let source = detectSource(for: appURL, appName: appName, brewApps: brewApps, appStoreApps: appStoreApps)
-            return ScannedApp(
-                name: appName,
-                kind: .application,
-                bundleIdentifier: bundleIdentifier(for: appURL),
-                version: version(for: appURL),
-                securityStatus: securityStatus(for: appURL, source: source),
-                sizeInBytes: allocatedSize(for: appURL),
-                path: appURL.path,
-                source: source
-            )
+    static let `default` = ScanOptions(
+        includeSystemApplications: true,
+        includeUserApplications: true,
+        includeExternalVolumes: false
+    )
+}
+
+enum ScanMode: String, CaseIterable, Sendable {
+    case quick
+    case full
+}
+
+struct ScanResult: Sendable {
+    let apps: [ScannedApp]
+    let cacheHits: Int
+    let cacheMisses: Int
+}
+
+private struct CachedAppMetadata: Sendable {
+    let fingerprint: String
+    let bundleIdentifier: String
+    let version: String
+    let securityStatus: SecurityStatus
+    let sizeInBytes: Int64?
+    let source: AppSource
+}
+
+private actor AppMetadataCache {
+    static let shared = AppMetadataCache()
+    private var entries: [String: CachedAppMetadata] = [:]
+
+    func entry(for path: String) -> CachedAppMetadata? {
+        entries[path]
+    }
+
+    func store(_ entry: CachedAppMetadata, for path: String) {
+        entries[path] = entry
+    }
+
+    func clear() {
+        entries.removeAll()
+    }
+}
+
+struct AppScanner: Sendable {
+    private let metadataBatchSize = 8
+
+    func scanApplications(options: ScanOptions = .default, mode: ScanMode = .quick) async -> ScanResult {
+        if mode == .full {
+            await AppMetadataCache.shared.clear()
         }
 
-        let cliTools = loadBrewFormulae()
+        let brewApps = loadBrewCasks()
+        let appStoreApps = loadMasApps()
+        let applicationURLs = loadApplicationURLs(options: options)
 
-        return (applications + cliTools)
+        let applicationScanResult = await scanAppBundles(
+            applicationURLs,
+            brewApps: brewApps,
+            appStoreApps: appStoreApps,
+            mode: mode
+        )
+
+        let cliTools = loadBrewFormulae()
+        let sortedApps = (applicationScanResult.apps + cliTools)
             .sorted { lhs, rhs in
                 switch lhs.name.localizedCaseInsensitiveCompare(rhs.name) {
                 case .orderedSame:
@@ -34,13 +80,145 @@ struct AppScanner {
                     return false
                 }
             }
+
+        return ScanResult(
+            apps: sortedApps,
+            cacheHits: applicationScanResult.cacheHits,
+            cacheMisses: applicationScanResult.cacheMisses
+        )
     }
 
-    private func loadApplicationURLs() -> [URL] {
-        let searchRoots = [
-            URL(fileURLWithPath: "/Applications"),
-            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
-        ]
+    private func scanAppBundles(_ applicationURLs: [URL], brewApps: [String], appStoreApps: Set<String>, mode: ScanMode) async -> (apps: [ScannedApp], cacheHits: Int, cacheMisses: Int) {
+        guard !applicationURLs.isEmpty else {
+            return ([], 0, 0)
+        }
+
+        var scannedApps: [ScannedApp] = []
+        var cacheHits = 0
+        var cacheMisses = 0
+        scannedApps.reserveCapacity(applicationURLs.count)
+
+        for startIndex in stride(from: 0, to: applicationURLs.count, by: metadataBatchSize) {
+            if Task.isCancelled {
+                break
+            }
+
+            let endIndex = min(startIndex + metadataBatchSize, applicationURLs.count)
+            let batch = Array(applicationURLs[startIndex ..< endIndex])
+
+            let scannedBatch = await withTaskGroup(of: (ScannedApp, Bool)?.self, returning: [(ScannedApp, Bool)].self) { group in
+                for appURL in batch {
+                    group.addTask {
+                        if Task.isCancelled {
+                            return nil
+                        }
+
+                        return await self.makeScannedApplication(
+                            for: appURL,
+                            brewApps: brewApps,
+                            appStoreApps: appStoreApps,
+                            mode: mode
+                        )
+                    }
+                }
+
+                var batchResult: [(ScannedApp, Bool)] = []
+                for await entry in group {
+                    if let entry {
+                        batchResult.append(entry)
+                    }
+                }
+
+                return batchResult
+            }
+
+            for (app, usedCache) in scannedBatch {
+                scannedApps.append(app)
+                if usedCache {
+                    cacheHits += 1
+                } else {
+                    cacheMisses += 1
+                }
+            }
+        }
+
+        return (scannedApps, cacheHits, cacheMisses)
+    }
+
+    private func makeScannedApplication(for appURL: URL, brewApps: [String], appStoreApps: Set<String>, mode: ScanMode) async -> (ScannedApp, Bool) {
+        let appName = appURL.deletingPathExtension().lastPathComponent
+        let fingerprint = metadataFingerprint(for: appURL)
+        let locationContext = storageLocation(for: appURL)
+        let path = appURL.path
+        let useCache = mode == .quick
+
+        if useCache,
+           let cachedMetadata = await AppMetadataCache.shared.entry(for: path),
+           cachedMetadata.fingerprint == fingerprint {
+            return (
+                ScannedApp(
+                    name: appName,
+                    kind: .application,
+                    bundleIdentifier: cachedMetadata.bundleIdentifier,
+                    version: cachedMetadata.version,
+                    securityStatus: cachedMetadata.securityStatus,
+                    sizeInBytes: cachedMetadata.sizeInBytes,
+                    path: path,
+                    source: cachedMetadata.source,
+                    location: locationContext.label,
+                    isExternal: locationContext.isExternal
+                ),
+                true
+            )
+        }
+
+        let source = detectSource(for: appURL, appName: appName, brewApps: brewApps, appStoreApps: appStoreApps)
+        let bundleIdentifier = bundleIdentifier(for: appURL)
+        let version = version(for: appURL)
+        let securityStatus = securityStatus(for: appURL, source: source)
+        let sizeInBytes = allocatedSize(for: appURL)
+
+        await AppMetadataCache.shared.store(
+            CachedAppMetadata(
+                fingerprint: fingerprint,
+                bundleIdentifier: bundleIdentifier,
+                version: version,
+                securityStatus: securityStatus,
+                sizeInBytes: sizeInBytes,
+                source: source
+            ),
+            for: path
+        )
+
+        return (
+            ScannedApp(
+                name: appName,
+                kind: .application,
+                bundleIdentifier: bundleIdentifier,
+                version: version,
+                securityStatus: securityStatus,
+                sizeInBytes: sizeInBytes,
+                path: path,
+                source: source,
+                location: locationContext.label,
+                isExternal: locationContext.isExternal
+            ),
+            false
+        )
+    }
+
+    private func loadApplicationURLs(options: ScanOptions) -> [URL] {
+        var searchRoots: [URL] = []
+        if options.includeSystemApplications {
+            searchRoots.append(URL(fileURLWithPath: "/Applications"))
+        }
+        if options.includeUserApplications {
+            searchRoots.append(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications"))
+        }
+        if options.includeExternalVolumes {
+            searchRoots.append(contentsOf: externalApplicationRoots())
+        }
+
         let keys: [URLResourceKey] = [.isApplicationKey, .isDirectoryKey]
         var urls = Set<URL>()
 
@@ -60,6 +238,37 @@ struct AppScanner {
         }
 
         return Array(urls)
+    }
+
+    private func externalApplicationRoots() -> [URL] {
+        let volumeKeys: [URLResourceKey] = [.volumeIsInternalKey, .volumeIsLocalKey]
+        guard let mountedVolumes = FileManager.default.mountedVolumeURLs(
+            includingResourceValuesForKeys: volumeKeys,
+            options: [.skipHiddenVolumes]
+        ) else {
+            return []
+        }
+
+        return mountedVolumes.compactMap { volumeURL in
+            guard volumeURL.path != "/" else {
+                return nil
+            }
+
+            guard let values = try? volumeURL.resourceValues(forKeys: Set(volumeKeys)),
+                  values.volumeIsLocal == true,
+                  values.volumeIsInternal == false else {
+                return nil
+            }
+
+            let applicationsURL = volumeURL.appendingPathComponent("Applications", isDirectory: true)
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: applicationsURL.path, isDirectory: &isDirectory),
+                  isDirectory.boolValue else {
+                return nil
+            }
+
+            return applicationsURL
+        }
     }
 
     private func loadBrewCasks() -> [String] {
@@ -83,7 +292,7 @@ struct AppScanner {
                 let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
                 guard parts.count == 2 else { return nil }
                 let fullName = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
-                return normalize(stripMasVersionSuffix(from: fullName))
+                return ScannerLogic.normalizedTokenString(ScannerLogic.stripMasVersionSuffix(from: fullName))
             }
 
         return Set(names)
@@ -105,6 +314,7 @@ struct AppScanner {
             .map { formula in
                 let version = versions[formula] ?? "Installed"
                 let path = URL(fileURLWithPath: cellarPath).appendingPathComponent(formula).path
+                let locationContext = storageLocation(for: URL(fileURLWithPath: path))
                 return ScannedApp(
                     name: formula,
                     kind: .cliTool,
@@ -113,9 +323,15 @@ struct AppScanner {
                     securityStatus: .notApplicable,
                     sizeInBytes: allocatedSize(for: URL(fileURLWithPath: path)),
                     path: path,
-                    source: .homebrew
+                    source: .homebrew,
+                    location: locationContext.label,
+                    isExternal: locationContext.isExternal
                 )
             }
+    }
+
+    private func storageLocation(for itemURL: URL) -> (label: String, isExternal: Bool) {
+        ScannerLogic.storageLocation(forPath: itemURL.path)
     }
 
     private func loadBrewFormulaVersions() -> [String: String] {
@@ -134,24 +350,12 @@ struct AppScanner {
     }
 
     private func detectSource(for appURL: URL, appName: String, brewApps: [String], appStoreApps: Set<String>) -> AppSource {
-        let normalizedName = normalize(appName)
-
-        for brewApp in brewApps {
-            let normalizedBrewName = normalize(brewApp)
-            if normalizedName.contains(normalizedBrewName) || normalizedBrewName.contains(normalizedName) {
-                return .homebrew
-            }
-        }
-
-        if appStoreApps.contains(normalizedName) {
-            return .appStore
-        }
-
-        if hasAppStoreReceipt(appURL) {
-            return .appStore
-        }
-
-        return .manual
+        ScannerLogic.detectSource(
+            appName: appName,
+            brewApps: brewApps,
+            appStoreApps: appStoreApps,
+            hasAppStoreReceipt: hasAppStoreReceipt(appURL)
+        )
     }
 
     private func hasAppStoreReceipt(_ appURL: URL) -> Bool {
@@ -287,26 +491,15 @@ struct AppScanner {
         return nil
     }
 
-    private func normalize(_ value: String) -> String {
-        value
-            .lowercased()
-            .replacingOccurrences(of: "-", with: " ")
-            .replacingOccurrences(of: "_", with: " ")
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
-    }
-
-    private func stripMasVersionSuffix(from value: String) -> String {
-        let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let versionRange = trimmedValue.range(
-            of: #"\s+\([^)]+\)$"#,
-            options: .regularExpression
-        ) else {
-            return trimmedValue
+    private func metadataFingerprint(for appURL: URL) -> String {
+        let keys: Set<URLResourceKey> = [.contentModificationDateKey, .creationDateKey, .fileSizeKey]
+        guard let values = try? appURL.resourceValues(forKeys: keys) else {
+            return "unknown"
         }
 
-        return String(trimmedValue[..<versionRange.lowerBound])
+        let modifiedAt = values.contentModificationDate ?? values.creationDate ?? .distantPast
+        let fileSize = values.fileSize ?? 0
+        return "\(modifiedAt.timeIntervalSinceReferenceDate)-\(fileSize)"
     }
 }
 

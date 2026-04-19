@@ -7,6 +7,28 @@ enum AppSource: String, CaseIterable, Codable, Sendable {
     case manual = "Manual / Unknown"
 }
 
+enum SourceTab: String, CaseIterable, Identifiable {
+    case all = "All"
+    case homebrew = "Homebrew"
+    case appStore = "App Store"
+    case manual = "Manual"
+
+    var id: Self { self }
+
+    var source: AppSource? {
+        switch self {
+        case .all:
+            return nil
+        case .homebrew:
+            return .homebrew
+        case .appStore:
+            return .appStore
+        case .manual:
+            return .manual
+        }
+    }
+}
+
 enum InstallKind: String, CaseIterable, Codable, Sendable {
     case application = "Application"
     case cliTool = "CLI Tool"
@@ -30,8 +52,10 @@ struct ScannedApp: Identifiable, Sendable {
     let sizeInBytes: Int64?
     let path: String
     let source: AppSource
+    let location: String
+    let isExternal: Bool
 
-    init(name: String, kind: InstallKind, bundleIdentifier: String, version: String, securityStatus: SecurityStatus, sizeInBytes: Int64?, path: String, source: AppSource) {
+    init(name: String, kind: InstallKind, bundleIdentifier: String, version: String, securityStatus: SecurityStatus, sizeInBytes: Int64?, path: String, source: AppSource, location: String, isExternal: Bool) {
         self.id = path
         self.name = name
         self.kind = kind
@@ -41,6 +65,8 @@ struct ScannedApp: Identifiable, Sendable {
         self.sizeInBytes = sizeInBytes
         self.path = path
         self.source = source
+        self.location = location
+        self.isExternal = isExternal
     }
 }
 
@@ -55,9 +81,11 @@ struct InstalledApp: Identifiable {
     let sizeInBytes: Int64?
     let path: String
     let source: AppSource
+    let location: String
+    let isExternal: Bool
     let icon: NSImage
 
-    init(name: String, kind: InstallKind, bundleIdentifier: String, version: String, duplicateCount: Int = 1, securityStatus: SecurityStatus, sizeInBytes: Int64?, path: String, source: AppSource, icon: NSImage) {
+    init(name: String, kind: InstallKind, bundleIdentifier: String, version: String, duplicateCount: Int = 1, securityStatus: SecurityStatus, sizeInBytes: Int64?, path: String, source: AppSource, location: String, isExternal: Bool, icon: NSImage) {
         self.id = path
         self.name = name
         self.kind = kind
@@ -68,6 +96,8 @@ struct InstalledApp: Identifiable {
         self.sizeInBytes = sizeInBytes
         self.path = path
         self.source = source
+        self.location = location
+        self.isExternal = isExternal
         self.icon = icon
     }
 
@@ -82,6 +112,8 @@ struct InstalledApp: Identifiable {
         self.sizeInBytes = scannedApp.sizeInBytes
         self.path = scannedApp.path
         self.source = scannedApp.source
+        self.location = scannedApp.location
+        self.isExternal = scannedApp.isExternal
         self.icon = icon
     }
 
@@ -118,6 +150,10 @@ struct InstalledApp: Identifiable {
         source.rawValue
     }
 
+    var locationLabel: String {
+        location
+    }
+
     var securityStatusLabel: String {
         securityStatus.rawValue
     }
@@ -137,30 +173,10 @@ struct InstalledApp: Identifiable {
             sizeInBytes: sizeInBytes,
             path: path,
             source: source,
+            location: location,
+            isExternal: isExternal,
             icon: icon
         )
-    }
-}
-
-enum SourceFilter: String, CaseIterable, Identifiable {
-    case all = "All"
-    case homebrew = "Homebrew"
-    case appStore = "App Store"
-    case manual = "Manual"
-
-    var id: Self { self }
-
-    var source: AppSource? {
-        switch self {
-        case .all:
-            return nil
-        case .homebrew:
-            return .homebrew
-        case .appStore:
-            return .appStore
-        case .manual:
-            return .manual
-        }
     }
 }
 
@@ -194,6 +210,8 @@ struct ExportedApp: Codable {
     let sizeInBytes: Int64?
     let path: String
     let source: String
+    let location: String
+    let isExternal: Bool
 
     init(app: InstalledApp) {
         name = app.name
@@ -206,5 +224,7 @@ struct ExportedApp: Codable {
         sizeInBytes = app.sizeInBytes
         path = app.path
         source = app.source.rawValue
+        location = app.location
+        isExternal = app.isExternal
     }
 }
