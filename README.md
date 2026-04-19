@@ -1,6 +1,6 @@
 # AppOrigins
 
-![AppOrigins icon](assets/apporigins-icon.svg)
+<img src="assets/apporigins-icon.svg" alt="AppOrigins icon" width="96" />
 
 [![Release](https://img.shields.io/github/v/release/usmslm102/mac-app-origins?display_name=tag)](https://github.com/usmslm102/mac-app-origins/releases)
 
