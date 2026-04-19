@@ -1,8 +1,12 @@
-# AppOrigins
+# AppOrigins [![Visitors](https://api.visitorbadge.io/api/visitors?path=https%3A%2F%2Fgithub.com%2Fusmslm102%2Fmac-app-origins&countColor=%23263759)](https://visitorbadge.io/status?path=https%3A%2F%2Fgithub.com%2Fusmslm102%2Fmac-app-origins)
 
 <img src="assets/apporigins-icon.svg" alt="AppOrigins icon" width="96" />
 
+## Release:
+
 [![Release](https://img.shields.io/github/v/release/usmslm102/mac-app-origins?display_name=tag)](https://github.com/usmslm102/mac-app-origins/releases)
+
+
 
 AppOrigins is a native macOS SwiftUI utility for inspecting installed software and where it came from.
 
