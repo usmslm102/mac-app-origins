@@ -19,5 +19,13 @@ struct AppOriginsApp: App {
         }
         .defaultSize(width: 1180, height: 760)
         .windowToolbarStyle(.unified)
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings...") {
+                    SettingsWindowController.shared.open(viewModel: viewModel)
+                }
+                .keyboardShortcut(",", modifiers: [.command])
+            }
+        }
     }
 }
