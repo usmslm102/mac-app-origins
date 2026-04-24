@@ -42,6 +42,37 @@ enum SecurityStatus: String, CaseIterable, Codable, Sendable {
     case notApplicable = "Not Applicable"
 }
 
+enum SecurityFilter: String, CaseIterable, Identifiable {
+    case all = "All Security"
+    case trusted = "Trusted"
+    case needsReview = "Needs Review"
+    case appStore = "App Store"
+    case signed = "Signed"
+    case adHoc = "Ad Hoc"
+    case unsigned = "Unsigned"
+
+    var id: Self { self }
+
+    func matches(_ status: SecurityStatus) -> Bool {
+        switch self {
+        case .all:
+            return true
+        case .trusted:
+            return status == .appStore || status == .signed
+        case .needsReview:
+            return status == .adHoc || status == .unsigned
+        case .appStore:
+            return status == .appStore
+        case .signed:
+            return status == .signed
+        case .adHoc:
+            return status == .adHoc
+        case .unsigned:
+            return status == .unsigned
+        }
+    }
+}
+
 struct ScannedApp: Identifiable, Sendable {
     let id: String
     let name: String

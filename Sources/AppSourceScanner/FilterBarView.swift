@@ -26,6 +26,21 @@ struct FilterBarView: View {
 
                 Divider().frame(height: 22)
 
+                Menu {
+                    Picker("Security", selection: $viewModel.selectedSecurityFilter) {
+                        ForEach(SecurityFilter.allCases) { filter in
+                            Text(filter.rawValue).tag(filter)
+                        }
+                    }
+                } label: {
+                    Label(viewModel.selectedSecurityFilter.rawValue, systemImage: "shield.lefthalf.filled")
+                }
+                .menuStyle(.button)
+                .controlSize(.small)
+                .fixedSize()
+
+                Divider().frame(height: 22)
+
                 Toggle("Duplicates", isOn: $viewModel.showDuplicatesOnly)
                     .toggleStyle(.switch)
                     .controlSize(.small)
@@ -35,6 +50,18 @@ struct FilterBarView: View {
                     .toggleStyle(.switch)
                     .controlSize(.small)
                     .fixedSize()
+
+                if viewModel.hasActiveFilters {
+                    Divider().frame(height: 22)
+
+                    Button {
+                        viewModel.clearFilters()
+                    } label: {
+                        Label("Reset", systemImage: "line.3.horizontal.decrease.circle")
+                    }
+                    .controlSize(.small)
+                    .fixedSize()
+                }
             }
             .fixedSize(horizontal: true, vertical: false)
         }

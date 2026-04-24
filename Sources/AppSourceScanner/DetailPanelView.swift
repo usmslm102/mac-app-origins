@@ -34,6 +34,8 @@ struct DetailPanelView: View {
                         Text(app.name)
                             .font(.title3.weight(.semibold))
                             .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.85)
 
                         HStack(spacing: 6) {
                             SourceBadge(source: app.source)
@@ -121,7 +123,8 @@ struct DetailPanelView: View {
             Text(value)
                 .textSelection(.enabled)
                 .font(mono ? .system(size: 12, design: .monospaced) : .system(size: 13))
-                .lineLimit(mono ? 3 : 1)
+                .lineLimit(mono ? 4 : 2)
+                .truncationMode(.middle)
         }
     }
 
@@ -129,6 +132,8 @@ struct DetailPanelView: View {
         Button(action: action) {
             Label(title, systemImage: icon)
                 .frame(maxWidth: .infinity)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
         }
         .controlSize(.small)
     }

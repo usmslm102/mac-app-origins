@@ -88,9 +88,12 @@ struct ContentView: View {
             Text("Try adjusting your search or filters.")
                 .foregroundStyle(.tertiary)
 
-            if !viewModel.searchText.isEmpty {
-                Button("Clear Search") {
-                    viewModel.searchText = ""
+            if viewModel.hasActiveFilters {
+                Button {
+                    viewModel.clearFilters()
+                    searchFieldFocused = true
+                } label: {
+                    Label("Clear Filters", systemImage: "line.3.horizontal.decrease.circle")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -103,16 +106,8 @@ struct ContentView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItemGroup(placement: .automatic) {
-            Menu {
-                Toggle("/Applications", isOn: $viewModel.includeSystemApplications)
-                Toggle("~/Applications", isOn: $viewModel.includeUserApplications)
-                Toggle("External Volumes", isOn: $viewModel.includeExternalVolumes)
-                Divider()
-                Picker("Default Refresh", selection: $viewModel.defaultRefreshMode) {
-                    ForEach(RefreshMode.allCases) { mode in
-                        Text(mode.actionLabel).tag(mode)
-                    }
-                }
+            Button {
+                SettingsWindowController.shared.open(viewModel: viewModel)
             } label: {
                 Label("Settings", systemImage: "gearshape")
             }

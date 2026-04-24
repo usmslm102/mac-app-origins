@@ -46,6 +46,7 @@ final class AppScannerViewModel: ObservableObject {
     @Published var searchText = ""
     @Published var selectedKindFilter: KindFilter = .all
     @Published var selectedSourceTab: SourceTab = .all
+    @Published var selectedSecurityFilter: SecurityFilter = .all
     @Published var showDuplicatesOnly = false
     @Published var showExternalOnly = false
     @Published var defaultRefreshMode: RefreshMode = .quick {
@@ -98,6 +99,7 @@ final class AppScannerViewModel: ObservableObject {
         apps.filter { app in
             let kindMatches = selectedKindFilter.kind.map { $0 == app.kind } ?? true
             let sourceMatches = selectedSourceTab.source.map { $0 == app.source } ?? true
+            let securityMatches = selectedSecurityFilter.matches(app.securityStatus)
             let duplicateMatches = !showDuplicatesOnly || app.hasDuplicates
             let externalMatches = !showExternalOnly || app.isExternal
             let searchMatches = searchText.isEmpty || [
@@ -114,9 +116,18 @@ final class AppScannerViewModel: ObservableObject {
                 app.source.rawValue
             ].contains { $0.localizedCaseInsensitiveContains(searchText) }
 
-            return kindMatches && sourceMatches && duplicateMatches && externalMatches && searchMatches
+            return kindMatches && sourceMatches && securityMatches && duplicateMatches && externalMatches && searchMatches
         }
         .sorted(using: sortOrder)
+    }
+
+    var hasActiveFilters: Bool {
+        !searchText.isEmpty ||
+            selectedKindFilter != .all ||
+            selectedSourceTab != .all ||
+            selectedSecurityFilter != .all ||
+            showDuplicatesOnly ||
+            showExternalOnly
     }
 
     var sourceSummary: String {
@@ -148,6 +159,10 @@ final class AppScannerViewModel: ObservableObject {
 
         if unknownSizeCount > 0 {
             parts.append("\(unknownSizeCount) unknown size")
+        }
+
+        if hasActiveFilters {
+            parts.append("filtered")
         }
 
         return parts.joined(separator: " • ")
@@ -217,6 +232,15 @@ final class AppScannerViewModel: ObservableObject {
 
     func refreshFull() {
         refresh(mode: .full)
+    }
+
+    func clearFilters() {
+        searchText = ""
+        selectedKindFilter = .all
+        selectedSourceTab = .all
+        selectedSecurityFilter = .all
+        showDuplicatesOnly = false
+        showExternalOnly = false
     }
 
     private func refresh(mode: RefreshMode) {
