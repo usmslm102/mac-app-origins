@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f8f9fb">
+  <meta name="description" content="Know what’s installed on your Mac and where it came from. AppOrigins is a native macOS utility for apps, Homebrew packages, duplicates, and signing status.">
+  <meta property="og:title" content="AppOrigins — Know your Mac’s software">
+  <meta property="og:description" content="Your apps. Their origins. One clear view. A native macOS utility for understanding your installed software.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://usamaansari.com/mac-app-origins/">
+  <meta property="og:image" content="https://usamaansari.com/mac-app-origins/assets/screenshot.png">
+  <link rel="canonical" href="https://usamaansari.com/mac-app-origins/">
+  <title>AppOrigins — Know your Mac’s software</title>
+  <link rel="icon" type="image/svg+xml" href="assets/icon.svg">
+  <link rel="stylesheet" href="styles.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="header wrap">
+    <a class="brand" href="./" aria-label="AppOrigins home"><img src="assets/icon.svg" width="34" height="34" alt="">AppOrigins</a>
+    <nav aria-label="Main navigation">
+      <a href="#demo">Demo</a>
+      <a href="https://github.com/usmslm102/mac-app-origins">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy wrap">
+        <p class="eyebrow">A clearer view of your Mac</p>
+        <h1 id="hero-title">AppOrigins<span class="brand-dot">.</span></h1>
+        <p class="tagline">Your apps. Their origins.<br>One clear view.</p>
+        <p class="intro">See what’s installed, where it came from,<br class="desktop-break"> and what’s taking up space.</p>
+        <div class="actions">
+          <a class="button primary" href="https://github.com/usmslm102/mac-app-origins/releases/latest/download/AppOrigins.dmg"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg>Download for Mac</a>
+          <a class="text-link" href="#demo">See it in action <span aria-hidden="true">↓</span></a>
+        </div>
+        <p class="requirement">macOS 13+ <span aria-hidden="true">·</span> Native SwiftUI <span aria-hidden="true">·</span> Open source</p>
+      </div>
+      <figure class="product-shot wrap">
+        <img src="assets/screenshot.png" width="2786" height="1638" alt="AppOrigins showing installed applications and CLI tools, with source, version, size, signing status, and an app detail panel" fetchpriority="high">
+        <figcaption>Your software inventory, all in one place.</figcaption>
+      </figure>
+    </section>
+    <section class="features wrap" aria-labelledby="features-title">
+      <div class="section-intro">
+        <p class="eyebrow">Less digging. More clarity.</p>
+        <h2 id="features-title">Get to know <br>what’s on your Mac.</h2>
+      </div>
+      <div class="feature-list">
+        <article><span class="feature-number" aria-hidden="true">01</span><div><h3>Trace the source.</h3><p>Homebrew, App Store, or a manual install. See where your apps and CLI tools came from at a glance.</p></div></article>
+        <article><span class="feature-number" aria-hidden="true">02</span><div><h3>Find the extra baggage.</h3><p>Spot duplicate app copies, compare sizes, and include external drives when you need the full picture.</p></div></article>
+        <article><span class="feature-number" aria-hidden="true">03</span><div><h3>Go from insight to action.</h3><p>Inspect signing status. Open an app, reveal it in Finder, or export your filtered view as CSV or JSON.</p></div></article>
+      </div>
+    </section>
+    <section class="demo-section" id="demo" aria-labelledby="demo-title">
+      <div class="wrap">
+        <div class="demo-heading"><div><p class="eyebrow">A quick look</p><h2 id="demo-title">Clarity in a few clicks.</h2></div><span class="demo-label">Actual app demo</span></div>
+        <div class="demo-player">
+          <img id="demo-image" src="assets/screenshot.png" width="2786" height="1638" loading="lazy" alt="AppOrigins demo preview">
+          <button class="play-button" id="demo-toggle" type="button" hidden aria-controls="demo-image"><span id="play-symbol" aria-hidden="true">▶</span><span id="play-label">Play demo</span></button>
+        </div>
+        <p class="demo-caption" id="demo-status" aria-live="polite">Scan. Filter. Inspect. Everything in one native window.</p>
+        <noscript><p><a href="assets/demo.gif">Watch the animated demo →</a></p></noscript>
+      </div>
+    </section>
+    <section class="download-section wrap" aria-labelledby="download-title">
+      <img class="download-icon" src="assets/icon.svg" width="72" height="72" alt="" loading="lazy">
+      <h2 id="download-title">A little more clarity.<br>A lot less guesswork.</h2>
+      <p>Meet your Mac’s software.</p>
+      <a class="button primary" href="https://github.com/usmslm102/mac-app-origins/releases/latest/download/AppOrigins.dmg"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg>Download AppOrigins</a>
+      <p class="install-note">macOS 13 or later. The current build is unsigned and not notarized.<br>For installation details, see the <a href="https://github.com/usmslm102/mac-app-origins#unsigned-build-warning">README</a>.</p>
+      <a class="text-link releases-link" href="https://github.com/usmslm102/mac-app-origins/releases">All releases &amp; checksums <span aria-hidden="true">↗</span></a>
+    </section>
+  </main>
+  <footer class="footer wrap"><a class="brand" href="./">AppOrigins</a><p>Built for the curious Mac user.</p><a href="https://github.com/usmslm102/mac-app-origins">Explore the source <span aria-hidden="true">↗</span></a></footer>
+</body>
+</html>

@@ -24,6 +24,29 @@ It scans your installed apps and Homebrew packages, then surfaces:
 
 ![AppOrigins demo](demo/demo.gif)
 
+## Project website
+
+The static showcase lives in `site/` and is deployed to
+[GitHub Pages](https://usamaansari.com/mac-app-origins/) by
+`.github/workflows/pages.yml`. Changes to the site, demo, or packaging script
+deploy automatically on `main`; pull requests build the site without deploying.
+The workflow can also be run manually from the Actions tab.
+
+In the repository’s **Settings → Pages**, select **GitHub Actions** as the build
+and deployment source before the first deployment.
+
+Preview locally without installing dependencies:
+
+```bash
+bash scripts/prepare-pages.sh
+python3 -m http.server 8000 --directory .pages-dist
+```
+
+Open `http://localhost:8000`. The build reuses `demo/demo.gif` and packages only
+the public site into the ignored `.pages-dist/` directory. Download buttons link
+directly to `AppOrigins.dmg` on the latest GitHub release, so publishing a new
+release updates the download without changing the site.
+
 ## Features
 
 - Scan `/Applications` and `~/Applications`
