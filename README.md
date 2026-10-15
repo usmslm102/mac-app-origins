@@ -63,11 +63,54 @@ release updates the download without changing the site.
 - Detect duplicate installed app copies and filter to duplicates only
 - Open apps, reveal them in Finder, open locations in Terminal, copy path/identifier, or move app bundles to Trash
 - Export the current view as CSV or JSON
+- Review Scan Activity: added items, items no longer found, and before/after changes to versions, sources, and signing status
+- Keep the previous scan locally across launches and export activity as JSON
+- Check GitHub for app updates and show an **Update Available** button when a newer stable release is available
+
+### Scan Activity
+
+Open **Scan Activity** from the toolbar or press **⇧⌘H**. The first completed
+scan saves a baseline on your Mac. Subsequent scans compare against the previous
+completed scan, including after reopening AppOrigins. Filter activity by change
+type, search by name or path, or choose **Show Item** to select it in the inventory.
+
+Changing scan locations establishes a new baseline. Copies at different paths
+are tracked separately, and size fluctuations do not count as changes. “No longer
+found” can mean an item was moved, a volume disconnected, or detection became
+unavailable; it does not confirm an uninstall. Activity reflects only the latest
+comparison, rather than a permanent event log.
+
+Use **⌘R** for a quick refresh and **⇧⌘R** for a full rescan, or choose either
+from the Refresh menu. Full rescans recalculate metadata and reload app icons.
+
+### App Updates
+
+AppOrigins checks its public GitHub releases when the app opens or becomes active,
+at most once every 24 hours. A newer stable release adds
+an **Update Available** button to the toolbar. It opens that release’s notes and
+download page. **Settings → Updates** also offers a direct **Download DMG** button
+when the release has a completed `AppOrigins.dmg` upload.
+
+Use **AppOrigins → Check for Updates…** for an immediate check, or turn automatic
+checks off in **Settings → Updates**. Downloads and installation are started by
+the user. A previously discovered update remains available if a later check fails.
+
+The installed version comes from the packaged app’s `CFBundleShortVersionString`.
+The release workflow sets it from the Git tag; local bundles can set it with
+`APP_VERSION` when packaging. Bare `swift run` development builds have no app-bundle
+version, so they offer a GitHub releases link instead of guessing whether they
+need an update. No GitHub account or token is required.
 
 ## Requirements
 
 - macOS 13 or later
 - Xcode or Swift Package Manager
+
+Run the regression tests with:
+
+```bash
+swift test
+```
 
 Optional tools:
 
@@ -144,9 +187,10 @@ xattr -dr com.apple.quarantine /Applications/AppOrigins.app
 - `brew list --cask` is used to build the Homebrew app list
 - `brew list --formula` is used to enumerate Homebrew CLI tools
 - `mas list` is used when `mas` is installed
-- `mdls -raw -name kMDItemAppStoreHasReceipt` is used as an App Store fallback
+- `Contents/_MASReceipt/receipt` is checked directly as an App Store fallback, including on volumes without Spotlight indexing
 - `codesign -dv --verbose=4` is used to classify apps as `Signed`, `Ad Hoc`, or `Unsigned`
 - recursive bundle or cellar folder size is calculated locally for each scanned item
+- quick-refresh metadata is invalidated when bundle metadata, signing resources, receipts, or detected source change
 
 ## Notes and Limitations
 

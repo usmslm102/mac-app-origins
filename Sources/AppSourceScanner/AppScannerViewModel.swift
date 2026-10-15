@@ -35,20 +35,29 @@ final class AppScannerViewModel: ObservableObject {
         static let includeUserApplications = "scan.includeUserApplications"
         static let includeExternalVolumes = "scan.includeExternalVolumes"
         static let defaultRefreshMode = "scan.defaultRefreshMode"
+        static let latestSnapshot = "activity.latestSnapshot.v1"
     }
 
     private let defaults: UserDefaults
     private var refreshTask: Task<Void, Never>?
     private var refreshGeneration = 0
     private var iconCache: [String: NSImage] = [:]
+    private var appsByID: [InstalledApp.ID: InstalledApp] = [:]
+    private var searchIndex: [InstalledApp.ID: String] = [:]
+    private var previousSnapshot: ScanSnapshot?
+    private var isUpdatingFilters = false
 
     @Published private(set) var apps: [InstalledApp] = []
-    @Published var searchText = ""
-    @Published var selectedKindFilter: KindFilter = .all
-    @Published var selectedSourceTab: SourceTab = .all
-    @Published var selectedSecurityFilter: SecurityFilter = .all
-    @Published var showDuplicatesOnly = false
-    @Published var showExternalOnly = false
+    @Published private(set) var filteredApps: [InstalledApp] = []
+    @Published private(set) var filteredSummary = "0 shown • 0 bytes total"
+    @Published private(set) var sourceSummary = "Ready to scan your installed software"
+    @Published private(set) var scanComparison: ScanComparison?
+    @Published var searchText = "" { didSet { updateFilteredApps() } }
+    @Published var selectedKindFilter: KindFilter = .all { didSet { updateFilteredApps() } }
+    @Published var selectedSourceTab: SourceTab = .all { didSet { updateFilteredApps() } }
+    @Published var selectedSecurityFilter: SecurityFilter = .all { didSet { updateFilteredApps() } }
+    @Published var showDuplicatesOnly = false { didSet { updateFilteredApps() } }
+    @Published var showExternalOnly = false { didSet { updateFilteredApps() } }
     @Published var defaultRefreshMode: RefreshMode = .quick {
         didSet {
             guard defaultRefreshMode != oldValue else { return }
@@ -73,7 +82,7 @@ final class AppScannerViewModel: ObservableObject {
             persistScanScopeAndRefresh()
         }
     }
-    @Published var sortOrder = [KeyPathComparator(\InstalledApp.name)]
+    @Published var sortOrder = [KeyPathComparator(\InstalledApp.name)] { didSet { updateFilteredApps() } }
     @Published var selectedAppID: InstalledApp.ID?
     @Published private(set) var isLoading = false
     @Published private(set) var lastError: String?
@@ -86,6 +95,9 @@ final class AppScannerViewModel: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        if let data = defaults.data(forKey: DefaultsKey.latestSnapshot) {
+            previousSnapshot = try? JSONDecoder().decode(ScanSnapshot.self, from: data)
+        }
         includeSystemApplications = defaults.object(forKey: DefaultsKey.includeSystemApplications) as? Bool ?? true
         includeUserApplications = defaults.object(forKey: DefaultsKey.includeUserApplications) as? Bool ?? true
         includeExternalVolumes = defaults.object(forKey: DefaultsKey.includeExternalVolumes) as? Bool ?? false
@@ -95,30 +107,28 @@ final class AppScannerViewModel: ObservableObject {
         }
     }
 
-    var filteredApps: [InstalledApp] {
-        apps.filter { app in
+    private func updateFilteredApps() {
+        guard !isUpdatingFilters else { return }
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        filteredApps = apps.filter { app in
             let kindMatches = selectedKindFilter.kind.map { $0 == app.kind } ?? true
             let sourceMatches = selectedSourceTab.source.map { $0 == app.source } ?? true
             let securityMatches = selectedSecurityFilter.matches(app.securityStatus)
             let duplicateMatches = !showDuplicatesOnly || app.hasDuplicates
             let externalMatches = !showExternalOnly || app.isExternal
-            let searchMatches = searchText.isEmpty || [
-                app.name,
-                app.kind.rawValue,
-                app.bundleIdentifier,
-                app.version,
-                app.duplicateLabel,
-                app.hasDuplicates ? "duplicate" : "",
-                app.location,
-                app.securityStatusLabel,
-                app.sizeLabel,
-                app.path,
-                app.source.rawValue
-            ].contains { $0.localizedCaseInsensitiveContains(searchText) }
+            guard kindMatches && sourceMatches && securityMatches && duplicateMatches && externalMatches else {
+                return false
+            }
+            let searchMatches = query.isEmpty || searchIndex[app.id]?.localizedCaseInsensitiveContains(query) == true
 
-            return kindMatches && sourceMatches && securityMatches && duplicateMatches && externalMatches && searchMatches
+            return searchMatches
         }
         .sorted(using: sortOrder)
+
+        if let selectedAppID, !filteredApps.contains(where: { $0.id == selectedAppID }) {
+            self.selectedAppID = nil
+        }
+        filteredSummary = makeFilteredSummary()
     }
 
     var hasActiveFilters: Bool {
@@ -130,7 +140,7 @@ final class AppScannerViewModel: ObservableObject {
             showExternalOnly
     }
 
-    var sourceSummary: String {
+    private func makeSourceSummary() -> String {
         let grouped = Dictionary(grouping: apps, by: \.source)
         let appCount = apps.filter { $0.kind == .application }.count
         let cliCount = apps.filter { $0.kind == .cliTool }.count
@@ -142,7 +152,7 @@ final class AppScannerViewModel: ObservableObject {
         return "\(apps.count) items, \(appCount) apps, \(cliCount) CLI, \(homebrewCount) Homebrew, \(appStoreCount) App Store, \(manualCount) manual, \(externalCount) external, \(duplicateCount) duplicate copies"
     }
 
-    var filteredSummary: String {
+    private func makeFilteredSummary() -> String {
         let visibleApps = filteredApps
         let totalSize = visibleApps.compactMap(\.sizeInBytes).reduce(Int64(0), +)
         let unknownSizeCount = visibleApps.filter { $0.sizeInBytes == nil }.count
@@ -235,12 +245,28 @@ final class AppScannerViewModel: ObservableObject {
     }
 
     func clearFilters() {
+        isUpdatingFilters = true
         searchText = ""
         selectedKindFilter = .all
         selectedSourceTab = .all
         selectedSecurityFilter = .all
         showDuplicatesOnly = false
         showExternalOnly = false
+        isUpdatingFilters = false
+        updateFilteredApps()
+    }
+
+    func selectActivityApp(path: String) {
+        guard appsByID[path] != nil else { return }
+        clearFilters()
+        selectedAppID = path
+    }
+
+    var activitySummary: String {
+        guard let scanComparison else { return "Scan Activity" }
+        guard scanComparison.hasBaseline else { return "Baseline saved" }
+        let count = scanComparison.changes.count
+        return count == 0 ? "No changes" : "\(count) \(count == 1 ? "change" : "changes")"
     }
 
     private func refresh(mode: RefreshMode) {
@@ -281,22 +307,53 @@ final class AppScannerViewModel: ObservableObject {
             return
         }
 
-        let scannedApps = scanResult.apps
-        let installedApps = scannedApps.map(makeInstalledApp)
+        applyScanResult(scanResult, options: options, mode: mode, startedAt: scanStart)
+        isLoading = false
+    }
+
+    // Accept only completed, current-generation scans; cancelled scans never replace the baseline.
+    func applyScanResult(_ scanResult: ScanResult, options: ScanOptions, mode: RefreshMode, startedAt: Date) {
+        if mode == .full { iconCache.removeAll() }
+        let installedApps = scanResult.apps.map(makeInstalledApp)
         let duplicateCounts = makeDuplicateCounts(for: installedApps)
         apps = installedApps.map { app in
             app.withDuplicateCount(duplicateCounts[app.id] ?? 1)
         }
-        if let selectedAppID, !apps.contains(where: { $0.id == selectedAppID }) {
-            self.selectedAppID = nil
+        appsByID = apps.reduce(into: [:]) { $0[$1.id] = $1 }
+        iconCache = iconCache.filter { appsByID[$0.key] != nil }
+        searchIndex = apps.reduce(into: [:]) { index, app in
+            index[app.id] = [
+                app.name, app.typeLabel, app.bundleIdentifier, app.version,
+                app.duplicateLabel, app.hasDuplicates ? "duplicate" : "",
+                app.location, app.securityStatusLabel, app.sizeLabel, app.path, app.sourceLabel
+            ].joined(separator: "\u{1F}")
         }
+        sourceSummary = makeSourceSummary()
+        updateFilteredApps()
 
-        lastScanDate = Date()
-        lastScanDuration = lastScanDate?.timeIntervalSince(scanStart)
+        let completedAt = Date()
+        lastScanDate = completedAt
+        lastScanDuration = completedAt.timeIntervalSince(startedAt)
         lastRefreshMode = mode
         lastCacheHits = scanResult.cacheHits
         lastCacheMisses = scanResult.cacheMisses
-        isLoading = false
+
+        let snapshot = ScanSnapshot(
+            apps: scanResult.apps,
+            scope: ScanScope(
+                includeSystemApplications: options.includeSystemApplications,
+                includeUserApplications: options.includeUserApplications,
+                includeExternalVolumes: options.includeExternalVolumes
+            ),
+            date: completedAt
+        )
+        scanComparison = ScanComparison(previous: previousSnapshot, current: snapshot)
+        previousSnapshot = snapshot
+        do {
+            defaults.set(try JSONEncoder().encode(snapshot), forKey: DefaultsKey.latestSnapshot)
+        } catch {
+            lastError = "The scan completed, but its activity baseline could not be saved."
+        }
     }
 
     func openSelectedApp() {
@@ -473,6 +530,18 @@ final class AppScannerViewModel: ObservableObject {
         }
     }
 
+    func exportScanActivity() {
+        guard let scanComparison else { return }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        do {
+            export(content: try encoder.encode(scanComparison), defaultName: "apporigins-scan-activity", fileExtension: "json")
+        } catch {
+            lastError = "Could not export scan activity."
+        }
+    }
+
     private func export(content: Data?, defaultName: String, fileExtension: String) {
         guard let content else {
             lastError = "Nothing to export."
@@ -500,7 +569,8 @@ final class AppScannerViewModel: ObservableObject {
     }
 
     private func makeInstalledApp(from scannedApp: ScannedApp) -> InstalledApp {
-        if let cachedIcon = iconCache[scannedApp.path] {
+        if let cachedIcon = iconCache[scannedApp.path],
+           appsByID[scannedApp.path]?.version == scannedApp.version {
             return InstalledApp(scannedApp: scannedApp, icon: cachedIcon)
         }
 
@@ -525,7 +595,7 @@ final class AppScannerViewModel: ObservableObject {
 
     private func app(for appID: InstalledApp.ID?) -> InstalledApp? {
         guard let appID else { return nil }
-        return apps.first(where: { $0.id == appID })
+        return appsByID[appID]
     }
 
     private func canOpen(_ app: InstalledApp) -> Bool {

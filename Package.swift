@@ -14,6 +14,11 @@ let package = Package(
         .executableTarget(
             name: "AppOrigins",
             path: "Sources/AppSourceScanner"
+        ),
+        .testTarget(
+            name: "AppOriginsTests",
+            dependencies: ["AppOrigins"],
+            path: "Tests/AppOriginsTests"
         )
     ]
 )
