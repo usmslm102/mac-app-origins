@@ -37,7 +37,13 @@ if [[ -f "${ICON_SOURCE}" ]]; then
   /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string ${APP_NAME}" "${CONTENTS_DIR}/Info.plist"
 fi
 
+# The linker's ad-hoc executable signature does not seal the app's Info.plist
+# or resources. Sign only after the complete bundle has been assembled.
+codesign --force --sign - "${APP_BUNDLE}"
+codesign --verify --deep --strict --verbose=2 "${APP_BUNDLE}"
+
 mkdir -p dmg
-cp -R "${APP_BUNDLE}" dmg/
+ditto "${APP_BUNDLE}" "dmg/${APP_NAME}.app"
+codesign --verify --deep --strict --verbose=2 "dmg/${APP_NAME}.app"
 ln -s /Applications dmg/Applications
 hdiutil create -volname "${APP_NAME}" -srcfolder dmg -ov -format UDZO "${APP_NAME}.dmg"

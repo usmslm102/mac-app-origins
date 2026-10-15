@@ -1,0 +1,40 @@
+name: Verify Community DMG
+
+on:
+  pull_request:
+    paths:
+      - "package-dmg.sh"
+      - "assets/**"
+      - ".github/workflows/release-unsigned.yml"
+      - ".github/workflows/package.yml"
+  push:
+    branches: [main]
+    paths:
+      - "package-dmg.sh"
+      - "assets/**"
+      - ".github/workflows/release-unsigned.yml"
+      - ".github/workflows/package.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build community DMG without an Apple account
+        env:
+          APP_VERSION: "0.0.0"
+          BUILD_NUMBER: "1"
+        run: ./package-dmg.sh
+      - name: Verify app inside the finished DMG
+        run: |
+          mkdir -p "$RUNNER_TEMP/apporigins-package-check"
+          hdiutil attach -readonly -nobrowse -mountpoint "$RUNNER_TEMP/apporigins-package-check" AppOrigins.dmg
+          trap 'hdiutil detach "$RUNNER_TEMP/apporigins-package-check"' EXIT
+          PACKAGE_APP="$RUNNER_TEMP/apporigins-package-check/AppOrigins.app"
+          codesign --verify --deep --strict --verbose=2 "$PACKAGE_APP"
+          ACTUAL_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PACKAGE_APP/Contents/Info.plist")
+          test "$ACTUAL_VERSION" = "0.0.0"

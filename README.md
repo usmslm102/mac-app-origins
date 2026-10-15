@@ -138,7 +138,7 @@ swift run
 
 ## Build a DMG
 
-Build an unsigned local DMG:
+Build a community DMG without an Apple Developer account:
 
 ```bash
 ./package-dmg.sh
@@ -154,7 +154,9 @@ APP_VERSION=1.0.0 BUILD_NUMBER=1 BUNDLE_IDENTIFIER=com.example.AppOrigins ./pack
 
 ## GitHub Release Workflow
 
-This repo includes an unsigned release workflow at `.github/workflows/release-unsigned.yml`.
+This repo includes a community release workflow at `.github/workflows/release-unsigned.yml`.
+It does not require an Apple Developer account, Developer ID certificate, or
+notarization credentials.
 
 Push a version tag:
 
@@ -166,21 +168,24 @@ git push origin v0.1.0
 The workflow will:
 
 - build `AppOrigins.dmg`
-- generate a SHA-256 checksum
+- generate a SHA-256 checksum and verify the app signature inside the finished DMG
 - create or update the GitHub release for that tag
 
 ## Unsigned Build Warning
 
-The generated app and DMG are unsigned and not notarized.
+The generated app bundle is ad-hoc signed after assembly so its metadata and
+resources have a valid signature. It is not Developer ID signed or notarized.
+The release workflow verifies the app signature inside the finished DMG before
+publishing it. Ad-hoc signing does not establish Apple-verified developer trust,
+so macOS can still block a quarantined download.
 
-macOS may warn users the first time they open the app. Typical local workarounds are:
-
-- `Right Click > Open`
-- removing quarantine after copying the app into `/Applications`
-
-```bash
-xattr -dr com.apple.quarantine /Applications/AppOrigins.app
-```
+After downloading from this repository's release page, copy the app to
+`/Applications` and try opening it. If macOS blocks the unidentified developer,
+open **System Settings → Privacy & Security → Open Anyway**, then confirm **Open**.
+This creates an exception for this app; see [Apple's instructions](https://support.apple.com/en-us/102445).
+If the app is reported as damaged, download the latest corrected release rather
+than overriding that alert. Packaging signature checks also run on pull requests
+through `.github/workflows/package.yml`.
 
 ## Detection Details
 
