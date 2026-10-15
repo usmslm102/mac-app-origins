@@ -4,19 +4,24 @@ enum ScannerLogic {
     static func detectSource(appName: String, brewApps: [String], appStoreApps: Set<String>, hasAppStoreReceipt: Bool) -> AppSource {
         let normalizedName = normalizedTokenString(appName)
 
+        // A receipt is stronger evidence than a name match against a cask.
+        if hasAppStoreReceipt || appStoreApps.contains(normalizedName) {
+            return .appStore
+        }
+
+        guard !normalizedName.isEmpty else {
+            return .manual
+        }
+
+        let appPhrase = " \(normalizedName) "
         for brewApp in brewApps {
             let normalizedBrewName = normalizedTokenString(brewApp)
-            if normalizedName.contains(normalizedBrewName) || normalizedBrewName.contains(normalizedName) {
+            guard !normalizedBrewName.isEmpty else { continue }
+            // Match whole words, so casks such as "arc" do not claim "Spark".
+            let brewPhrase = " \(normalizedBrewName) "
+            if appPhrase.contains(brewPhrase) || brewPhrase.contains(appPhrase) {
                 return .homebrew
             }
-        }
-
-        if appStoreApps.contains(normalizedName) {
-            return .appStore
-        }
-
-        if hasAppStoreReceipt {
-            return .appStore
         }
 
         return .manual

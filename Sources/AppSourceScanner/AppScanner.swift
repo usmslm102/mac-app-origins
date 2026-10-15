@@ -68,7 +68,7 @@ struct AppScanner: Sendable {
             mode: mode
         )
 
-        let cliTools = loadBrewFormulae()
+        let cliTools = Task.isCancelled ? [] : loadBrewFormulae()
         let sortedApps = (applicationScanResult.apps + cliTools)
             .sorted { lhs, rhs in
                 switch lhs.name.localizedCaseInsensitiveCompare(rhs.name) {
@@ -88,7 +88,7 @@ struct AppScanner: Sendable {
         )
     }
 
-    private func scanAppBundles(_ applicationURLs: [URL], brewApps: [String], appStoreApps: Set<String>, mode: ScanMode) async -> (apps: [ScannedApp], cacheHits: Int, cacheMisses: Int) {
+    func scanAppBundles(_ applicationURLs: [URL], brewApps: [String], appStoreApps: Set<String>, mode: ScanMode) async -> (apps: [ScannedApp], cacheHits: Int, cacheMisses: Int) {
         guard !applicationURLs.isEmpty else {
             return ([], 0, 0)
         }
@@ -145,16 +145,19 @@ struct AppScanner: Sendable {
         return (scannedApps, cacheHits, cacheMisses)
     }
 
-    private func makeScannedApplication(for appURL: URL, brewApps: [String], appStoreApps: Set<String>, mode: ScanMode) async -> (ScannedApp, Bool) {
+    private func makeScannedApplication(for appURL: URL, brewApps: [String], appStoreApps: Set<String>, mode: ScanMode) async -> (ScannedApp, Bool)? {
         let appName = appURL.deletingPathExtension().lastPathComponent
         let fingerprint = metadataFingerprint(for: appURL)
         let locationContext = storageLocation(for: appURL)
         let path = appURL.path
         let useCache = mode == .quick
+        let source = detectSource(for: appURL, appName: appName, brewApps: brewApps, appStoreApps: appStoreApps)
 
         if useCache,
+           let fingerprint,
            let cachedMetadata = await AppMetadataCache.shared.entry(for: path),
-           cachedMetadata.fingerprint == fingerprint {
+           cachedMetadata.fingerprint == fingerprint,
+           cachedMetadata.source == source {
             return (
                 ScannedApp(
                     name: appName,
@@ -172,23 +175,27 @@ struct AppScanner: Sendable {
             )
         }
 
-        let source = detectSource(for: appURL, appName: appName, brewApps: brewApps, appStoreApps: appStoreApps)
-        let bundleIdentifier = bundleIdentifier(for: appURL)
-        let version = version(for: appURL)
+        let bundleMetadata = bundleMetadata(for: appURL)
+        let bundleIdentifier = bundleMetadata.identifier
+        let version = bundleMetadata.version
         let securityStatus = securityStatus(for: appURL, source: source)
         let sizeInBytes = allocatedSize(for: appURL)
 
-        await AppMetadataCache.shared.store(
-            CachedAppMetadata(
-                fingerprint: fingerprint,
-                bundleIdentifier: bundleIdentifier,
-                version: version,
-                securityStatus: securityStatus,
-                sizeInBytes: sizeInBytes,
-                source: source
-            ),
-            for: path
-        )
+        guard !Task.isCancelled else { return nil }
+
+        if let fingerprint {
+            await AppMetadataCache.shared.store(
+                CachedAppMetadata(
+                    fingerprint: fingerprint,
+                    bundleIdentifier: bundleIdentifier,
+                    version: version,
+                    securityStatus: securityStatus,
+                    sizeInBytes: sizeInBytes,
+                    source: source
+                ),
+                for: path
+            )
+        }
 
         return (
             ScannedApp(
@@ -232,8 +239,10 @@ struct AppScanner: Sendable {
             }
 
             for case let url as URL in enumerator {
-                guard url.pathExtension == "app" else { continue }
-                urls.insert(url)
+                guard !Task.isCancelled else { return Array(urls) }
+                guard url.pathExtension.lowercased() == "app",
+                      (try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+                urls.insert(url.standardizedFileURL)
             }
         }
 
@@ -359,37 +368,27 @@ struct AppScanner: Sendable {
     }
 
     private func hasAppStoreReceipt(_ appURL: URL) -> Bool {
-        guard let output = Shell.run(
-            "mdls",
-            arguments: ["-raw", "-name", "kMDItemAppStoreHasReceipt", appURL.path]
-        ) else {
-            return false
-        }
-
-        return output.trimmingCharacters(in: .whitespacesAndNewlines) == "1"
+        let receiptURL = appURL.appendingPathComponent("Contents/_MASReceipt/receipt")
+        return (try? receiptURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
     }
 
-    private func bundleIdentifier(for appURL: URL) -> String {
-        Bundle(url: appURL)?.bundleIdentifier ?? "Unknown"
-    }
-
-    private func version(for appURL: URL) -> String {
-        guard let bundle = Bundle(url: appURL) else {
-            return "Unknown"
-        }
-
-        let shortVersion = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-        let buildNumber = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-
+    private func bundleMetadata(for appURL: URL) -> (identifier: String, version: String) {
+        // Bundle caches Info.plist values for a URL, even after an app updates in place.
+        let infoURL = appURL.appendingPathComponent("Contents/Info.plist")
+        let info = (try? Data(contentsOf: infoURL))
+            .flatMap { try? PropertyListSerialization.propertyList(from: $0, format: nil) as? [String: Any] } ?? [:]
+        let identifier = info["CFBundleIdentifier"] as? String ?? "Unknown"
+        let shortVersion = info["CFBundleShortVersionString"] as? String
+        let buildNumber = info["CFBundleVersion"] as? String
         switch (shortVersion?.isEmpty == false ? shortVersion : nil, buildNumber?.isEmpty == false ? buildNumber : nil) {
         case let (version?, build?) where version != build:
-            return "\(version) (\(build))"
+            return (identifier, "\(version) (\(build))")
         case let (version?, _):
-            return version
+            return (identifier, version)
         case let (_, build?):
-            return build
+            return (identifier, build)
         default:
-            return "Unknown"
+            return (identifier, "Unknown")
         }
     }
 
@@ -458,6 +457,7 @@ struct AppScanner: Sendable {
         var foundAnyEntry = false
 
         for case let fileURL as URL in enumerator {
+            guard !Task.isCancelled else { return nil }
             guard let values = try? fileURL.resourceValues(forKeys: resourceKeys) else {
                 continue
             }
@@ -491,20 +491,42 @@ struct AppScanner: Sendable {
         return nil
     }
 
-    private func metadataFingerprint(for appURL: URL) -> String {
+    private func metadataFingerprint(for appURL: URL) -> String? {
         let keys: Set<URLResourceKey> = [.contentModificationDateKey, .creationDateKey, .fileSizeKey]
-        guard let values = try? appURL.resourceValues(forKeys: keys) else {
-            return "unknown"
+        guard (try? appURL.resourceValues(forKeys: keys)) != nil else {
+            return nil
         }
 
-        let modifiedAt = values.contentModificationDate ?? values.creationDate ?? .distantPast
-        let fileSize = values.fileSize ?? 0
-        return "\(modifiedAt.timeIntervalSinceReferenceDate)-\(fileSize)"
+        // Updating an existing nested file does not change the .app directory date.
+        let paths = ["", "Contents", "Contents/Info.plist", "Contents/MacOS", "Contents/_CodeSignature/CodeResources", "Contents/_MASReceipt/receipt"]
+        return paths.map { path in
+            let url = path.isEmpty ? appURL : appURL.appendingPathComponent(path)
+            guard let values = try? url.resourceValues(forKeys: keys) else { return "\(path):missing" }
+            let modifiedAt = values.contentModificationDate ?? values.creationDate ?? .distantPast
+            return "\(path):\(modifiedAt.timeIntervalSinceReferenceDate):\(values.fileSize ?? 0)"
+        }.joined(separator: "|")
     }
 }
 
 enum Shell {
-    struct Result {
+    private final class OutputBuffer: @unchecked Sendable {
+        private let lock = NSLock()
+        private var data = Data()
+
+        func store(_ data: Data) {
+            lock.lock()
+            self.data = data
+            lock.unlock()
+        }
+
+        func string() -> String {
+            lock.lock()
+            defer { lock.unlock() }
+            return String(data: data, encoding: .utf8) ?? ""
+        }
+    }
+
+    struct Result: Sendable {
         let terminationStatus: Int32
         let standardOutput: String
         let standardError: String
@@ -555,18 +577,28 @@ enum Shell {
 
         do {
             try process.run()
-            process.waitUntilExit()
         } catch {
             return nil
         }
 
+        // Drain stdout on this thread and stderr on a dedicated thread. Queuing
+        // readers on a global Dispatch queue can starve when cooperative task
+        // workers are all blocked waiting for those readers to finish.
+        let stderrFinished = DispatchSemaphore(value: 0)
+        let stderrBuffer = OutputBuffer()
+        Thread.detachNewThread {
+            stderrBuffer.store(stderr.fileHandleForReading.readDataToEndOfFile())
+            stderrFinished.signal()
+        }
+
         let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = stderr.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        stderrFinished.wait()
 
         return Result(
             terminationStatus: process.terminationStatus,
             standardOutput: String(data: stdoutData, encoding: .utf8) ?? "",
-            standardError: String(data: stderrData, encoding: .utf8) ?? ""
+            standardError: stderrBuffer.string()
         )
     }
 

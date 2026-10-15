@@ -3,7 +3,9 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var viewModel: AppScannerViewModel
+    @EnvironmentObject private var updateChecker: AppUpdateChecker
     @FocusState private var searchFieldFocused: Bool
+    @State private var showingActivity = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,6 +26,10 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .toolbar { toolbarContent }
+        .sheet(isPresented: $showingActivity) {
+            ScanActivityView()
+                .environmentObject(viewModel)
+        }
         .alert("Move App to Trash?", isPresented: moveToTrashBinding, presenting: viewModel.pendingTrashApp) { app in
             Button("Cancel", role: .cancel) { viewModel.dismissTrashConfirmation() }
             Button("Move to Trash", role: .destructive) {
@@ -107,7 +113,7 @@ struct ContentView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItemGroup(placement: .automatic) {
             Button {
-                SettingsWindowController.shared.open(viewModel: viewModel)
+                SettingsWindowController.shared.open(viewModel: viewModel, updateChecker: updateChecker)
             } label: {
                 Label("Settings", systemImage: "gearshape")
             }
@@ -138,6 +144,20 @@ struct ContentView: View {
         }
 
         ToolbarItemGroup(placement: .primaryAction) {
+            if let release = updateChecker.availableRelease {
+                Button { updateChecker.openReleasePage() } label: {
+                    Label("Update Available", systemImage: "arrow.down.circle.fill")
+                }
+                .labelStyle(.titleAndIcon)
+                .help("AppOrigins \(release.tagName) is available. View the release and download the update.")
+            }
+
+            Button { showingActivity = true } label: {
+                Label("Scan Activity", systemImage: "clock.arrow.circlepath")
+            }
+            .help("\(viewModel.activitySummary) — review changes since the previous scan")
+            .keyboardShortcut("h", modifiers: [.command, .shift])
+
             Menu {
                 Button("Copy Path") { viewModel.copySelectedPath() }
                     .disabled(viewModel.selectedApp == nil)
@@ -150,10 +170,17 @@ struct ContentView: View {
                 Label("Export & Copy", systemImage: "square.and.arrow.up")
             }
 
-            Button { viewModel.refresh() } label: {
+            Menu {
+                Button("Quick Refresh") { viewModel.refreshQuick() }
+                    .keyboardShortcut("r", modifiers: [.command])
+                Button("Full Rescan") { viewModel.refreshFull() }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+            } label: {
                 Label("Refresh", systemImage: "arrow.clockwise")
+            } primaryAction: {
+                viewModel.refresh()
             }
-            .keyboardShortcut("r", modifiers: [.command])
+            .disabled(viewModel.isLoading)
         }
     }
 

@@ -1,22 +1,40 @@
 import AppKit
 import SwiftUI
 
+enum SettingsTab: Hashable {
+    case scanning, refresh, updates
+}
+
+@MainActor
+final class SettingsNavigation: ObservableObject {
+    @Published var selectedTab: SettingsTab = .scanning
+}
+
 struct SettingsView: View {
     @EnvironmentObject private var viewModel: AppScannerViewModel
+    @ObservedObject var navigation: SettingsNavigation
 
     var body: some View {
-        TabView {
+        TabView(selection: $navigation.selectedTab) {
             scanSettings
                 .tabItem {
                     Label("Scanning", systemImage: "magnifyingglass")
                 }
+                .tag(SettingsTab.scanning)
 
             refreshSettings
                 .tabItem {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
+                .tag(SettingsTab.refresh)
+
+            UpdatesSettingsView()
+                .tabItem {
+                    Label("Updates", systemImage: "arrow.down.circle")
+                }
+                .tag(SettingsTab.updates)
         }
-        .frame(width: 460, height: 300)
+        .frame(width: 460, height: 380)
     }
 
     private var scanSettings: some View {
@@ -94,10 +112,12 @@ final class SettingsWindowController {
     static let shared = SettingsWindowController()
 
     private var window: NSWindow?
+    private let navigation = SettingsNavigation()
 
     private init() {}
 
-    func open(viewModel: AppScannerViewModel) {
+    func open(viewModel: AppScannerViewModel, updateChecker: AppUpdateChecker, tab: SettingsTab? = nil) {
+        if let tab { navigation.selectedTab = tab }
         if let window {
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -105,8 +125,9 @@ final class SettingsWindowController {
         }
 
         let hostingController = NSHostingController(
-            rootView: SettingsView()
+            rootView: SettingsView(navigation: navigation)
                 .environmentObject(viewModel)
+                .environmentObject(updateChecker)
         )
 
         let window = NSWindow(contentViewController: hostingController)
