@@ -26,6 +26,28 @@ struct ScannerTests {
         #expect(result.standardError == String(repeating: "e", count: 262144))
     }
 
+    @Test func concurrentSubprocessesDrainOutputWithoutWorkerStarvation() async {
+        let results = await withTaskGroup(of: Shell.Result?.self, returning: [Shell.Result?].self) { group in
+            for _ in 0..<8 {
+                group.addTask {
+                    Shell.runDetailed("/usr/bin/perl", arguments: [
+                        "-e", "alarm 5; print STDOUT 'o' x 262144; print STDERR 'e' x 262144;"
+                    ])
+                }
+            }
+            var results: [Shell.Result?] = []
+            for await result in group { results.append(result) }
+            return results
+        }
+
+        #expect(results.count == 8)
+        for result in results {
+            #expect(result?.terminationStatus == 0)
+            #expect(result?.standardOutput == String(repeating: "o", count: 262144))
+            #expect(result?.standardError == String(repeating: "e", count: 262144))
+        }
+    }
+
     @Test func quickScanRefreshesMetadataAfterAnInPlaceUpdate() async throws {
         let fixture = try TemporaryApplication()
         defer { fixture.remove() }

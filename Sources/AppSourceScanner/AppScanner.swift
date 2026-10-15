@@ -526,7 +526,7 @@ enum Shell {
         }
     }
 
-    struct Result {
+    struct Result: Sendable {
         let terminationStatus: Int32
         let standardOutput: String
         let standardError: String
@@ -581,28 +581,23 @@ enum Shell {
             return nil
         }
 
-        // Both pipes must drain while the child runs; waiting first can fill a
-        // pipe and leave both the process and the scanner waiting forever.
-        let readers = DispatchGroup()
-        let stdoutBuffer = OutputBuffer()
+        // Drain stdout on this thread and stderr on a dedicated thread. Queuing
+        // readers on a global Dispatch queue can starve when cooperative task
+        // workers are all blocked waiting for those readers to finish.
+        let stderrFinished = DispatchSemaphore(value: 0)
         let stderrBuffer = OutputBuffer()
-        readers.enter()
-        DispatchQueue.global(qos: .utility).async {
-            stdoutBuffer.store(stdout.fileHandleForReading.readDataToEndOfFile())
-            readers.leave()
-        }
-        readers.enter()
-        DispatchQueue.global(qos: .utility).async {
+        Thread.detachNewThread {
             stderrBuffer.store(stderr.fileHandleForReading.readDataToEndOfFile())
-            readers.leave()
+            stderrFinished.signal()
         }
 
+        let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        readers.wait()
+        stderrFinished.wait()
 
         return Result(
             terminationStatus: process.terminationStatus,
-            standardOutput: stdoutBuffer.string(),
+            standardOutput: String(data: stdoutData, encoding: .utf8) ?? "",
             standardError: stderrBuffer.string()
         )
     }
