@@ -22,7 +22,8 @@ permissions:
 jobs:
   test:
     runs-on: macos-15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - name: Run Swift Testing regression suite
-        run: swift test --disable-xctest
+        run: python3 scripts/run-tests-ci.py
