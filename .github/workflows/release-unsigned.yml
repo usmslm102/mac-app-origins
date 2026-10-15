@@ -16,7 +16,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Build unsigned DMG
+      - name: Build community DMG
         env:
           APP_VERSION: ${{ github.ref_name }}
           BUILD_NUMBER: ${{ github.run_number }}
@@ -27,6 +27,18 @@ jobs:
 
       - name: Create checksum
         run: shasum -a 256 AppOrigins.dmg > AppOrigins.dmg.sha256
+
+      - name: Verify packaged app signature and version
+        env:
+          EXPECTED_VERSION: ${{ github.ref_name }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/apporigins-release"
+          hdiutil attach -readonly -nobrowse -mountpoint "$RUNNER_TEMP/apporigins-release" AppOrigins.dmg
+          trap 'hdiutil detach "$RUNNER_TEMP/apporigins-release"' EXIT
+          RELEASE_APP="$RUNNER_TEMP/apporigins-release/AppOrigins.app"
+          codesign --verify --deep --strict --verbose=2 "$RELEASE_APP"
+          ACTUAL_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$RELEASE_APP/Contents/Info.plist")
+          test "$ACTUAL_VERSION" = "${EXPECTED_VERSION#v}"
 
       - name: Publish release assets
         env:
@@ -40,5 +52,5 @@ jobs:
               AppOrigins.dmg \
               AppOrigins.dmg.sha256 \
               --title "$TAG_NAME" \
-              --notes "Unsigned release build."
+              --notes "Ad-hoc signed community build; not Developer ID signed or notarized."
           fi
