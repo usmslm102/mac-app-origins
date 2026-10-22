@@ -49,6 +49,7 @@ final class AppScannerViewModel: ObservableObject {
 
     @Published private(set) var apps: [InstalledApp] = []
     @Published private(set) var filteredApps: [InstalledApp] = []
+    @Published private(set) var storageSummary = StorageSummary(apps: [])
     @Published private(set) var filteredSummary = "0 shown • 0 bytes total"
     @Published private(set) var sourceSummary = "Ready to scan your installed software"
     @Published private(set) var scanComparison: ScanComparison?
@@ -319,6 +320,7 @@ final class AppScannerViewModel: ObservableObject {
         apps = installedApps.map { app in
             app.withDuplicateCount(duplicateCounts[app.id] ?? 1)
         }
+        storageSummary = StorageSummary(apps: scanResult.apps)
         appsByID = apps.reduce(into: [:]) { $0[$1.id] = $1 }
         iconCache = iconCache.filter { appsByID[$0.key] != nil }
         searchIndex = apps.reduce(into: [:]) { index, app in

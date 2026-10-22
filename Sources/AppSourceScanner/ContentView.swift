@@ -15,6 +15,7 @@ struct ContentView: View {
                     Spacer()
                     searchField
                 }
+                StorageOverviewView()
                 FilterBarView()
                 contentArea
             }
