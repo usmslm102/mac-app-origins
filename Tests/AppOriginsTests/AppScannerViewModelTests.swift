@@ -85,6 +85,74 @@ struct AppScannerViewModelTests {
         #expect(model.sourceSummary.contains("1 items"))
     }
 
+    @Test func storageSummaryAlwaysCoversFullInventoryRegardlessOfFilters() {
+        let suite = "AppOriginsTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = AppScannerViewModel(defaults: defaults)
+        completeScan(model, apps: [
+            item("Alpha", source: .appStore, size: 1_024),
+            item("Alpha Copy", size: 2_048, external: true, identifier: "com.test.Alpha"),
+            item("tool", source: .homebrew, kind: .cliTool, size: nil)
+        ])
+        let summary = model.storageSummary
+        #expect(summary.total.itemCount == 3)
+        #expect(summary.total.sizeInBytes == 3_072)
+        #expect(summary.total.unknownSizeCount == 1)
+        #expect(model.apps.filter(\.hasDuplicates).count == 2)
+
+        model.searchText = "Alpha"
+        #expect(model.filteredApps.count == 2)
+        #expect(model.storageSummary == summary)
+        model.clearFilters()
+        model.selectedSourceTab = .appStore
+        #expect(model.filteredApps.count == 1)
+        #expect(model.storageSummary == summary)
+        model.clearFilters()
+        model.selectedKindFilter = .cliTools
+        #expect(model.filteredApps.count == 1)
+        #expect(model.storageSummary == summary)
+        model.clearFilters()
+        model.selectedSecurityFilter = .unsigned
+        #expect(model.filteredApps.isEmpty)
+        #expect(model.storageSummary == summary)
+        model.clearFilters()
+        model.showDuplicatesOnly = true
+        #expect(model.filteredApps.count == 2)
+        #expect(model.storageSummary == summary)
+        model.clearFilters()
+        model.showExternalOnly = true
+        #expect(model.filteredApps.count == 1)
+        #expect(model.storageSummary == summary)
+        model.sortOrder = [KeyPathComparator(\InstalledApp.name, order: .reverse)]
+        #expect(model.storageSummary == summary)
+    }
+
+    @Test func storageSummaryReplacesSizesAndRemovesMissingInstallationsAfterRefresh() {
+        let suite = "AppOriginsTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = AppScannerViewModel(defaults: defaults)
+        completeScan(model, apps: [
+            item("Alpha", size: 100),
+            item("Beta", source: .homebrew, size: 200, external: true)
+        ])
+        #expect(model.storageSummary.total.sizeInBytes == 300)
+        #expect(model.storageSummary.externalStorage.itemCount == 1)
+
+        model.searchText = "Beta"
+        completeScan(model, apps: [item("Alpha", version: "2.0", size: 900)])
+        #expect(model.filteredApps.isEmpty)
+        #expect(model.storageSummary.total.itemCount == 1)
+        #expect(model.storageSummary.total.sizeInBytes == 900)
+        #expect(model.storageSummary.internalStorage.sizeInBytes == 900)
+        #expect(model.storageSummary.externalStorage.itemCount == 0)
+        #expect(model.storageSummary.bySource.first { $0.source == .homebrew }?.total.itemCount == 0)
+
+        completeScan(model, apps: [])
+        #expect(model.storageSummary == StorageSummary(apps: []))
+    }
+
     private func completeScan(_ model: AppScannerViewModel, apps: [ScannedApp], options: ScanOptions = .default) {
         model.applyScanResult(
             ScanResult(apps: apps, cacheHits: 0, cacheMisses: apps.count),
@@ -94,12 +162,20 @@ struct AppScannerViewModelTests {
         )
     }
 
-    private func item(_ name: String, version: String = "1.0", source: AppSource = .manual) -> ScannedApp {
+    private func item(
+        _ name: String,
+        version: String = "1.0",
+        source: AppSource = .manual,
+        kind: InstallKind = .application,
+        size: Int64? = 1_024,
+        external: Bool = false,
+        identifier: String? = nil
+    ) -> ScannedApp {
         ScannedApp(
-            name: name, kind: .application, bundleIdentifier: "com.test.\(name)",
-            version: version, securityStatus: .signed, sizeInBytes: 1024,
-            path: "/Applications/\(name).app", source: source,
-            location: "Internal Disk", isExternal: false
+            name: name, kind: kind, bundleIdentifier: identifier ?? "com.test.\(name)",
+            version: version, securityStatus: .signed, sizeInBytes: size,
+            path: "\(external ? "/Volumes/External" : "")/Applications/\(name).app", source: source,
+            location: external ? "External" : "Internal Disk", isExternal: external
         )
     }
 }

@@ -60,12 +60,26 @@ release updates the download without changing the site.
 - Filter to external installs only
 - Choose quick refresh (cached metadata) or full rescan
 - Show total size for the current filtered result set
+- See overall app and CLI sizes at a glance, with a breakdown by source, install type, and internal or external storage
 - Detect duplicate installed app copies and filter to duplicates only
 - Open apps, reveal them in Finder, open locations in Terminal, copy path/identifier, or move app bundles to Trash
 - Export the current view as CSV or JSON
 - Review Scan Activity: added items, items no longer found, and before/after changes to versions, sources, and signing status
 - Keep the previous scan locally across launches and export activity as JSON
 - Check GitHub for app updates and show an **Update Available** button when a newer stable release is available
+
+### Overall Sizes
+
+The size overview above the filters shows the combined size of every scanned
+install, plus separate totals for apps and CLI tools. Choose **Size Breakdown**
+to see totals by source, install type, and internal or external storage. These
+totals stay tied to the full scan when you search or filter; the bottom bar shows
+the size of the current results.
+
+Sizes cover scanned app bundles and Homebrew formula folders, including each
+installed copy. They do not include app support files or all used disk space.
+Items with unknown sizes are counted and excluded from byte totals. Refreshing
+updates the overview when the scan completes.
 
 ### Scan Activity
 
